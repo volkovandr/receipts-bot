@@ -13,7 +13,7 @@ A Telegram bot that processes receipt images and financial documents using Claud
 
 ### 1. Prerequisites
 
-- Python 3.8 or higher
+- Python 3.13 or higher
 - PostgreSQL database
 - Telegram Bot Token ([get one from BotFather](https://t.me/botfather))
 - Anthropic API Key ([get one from Anthropic](https://console.anthropic.com/))
@@ -41,14 +41,14 @@ venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-5. Set up environment variables:
+5. Set up bot configuration:
 ```bash
-cp .env.example .env
+cp config.ini.example config.ini
 ```
 
-Edit `.env` and add your credentials:
-- `TELEGRAM_BOT_TOKEN`: Your Telegram bot token
-- `ANTHROPIC_API_KEY`: Your Claude API key
+Edit `config.ini` and add your credentials:
+- `bot_token`: Your Telegram bot token
+- `api_key`: Your Claude API key
 - Database credentials
 
 ### 3. Test the Setup

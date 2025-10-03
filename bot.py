@@ -4,17 +4,40 @@ Simple Hello World Telegram Bot
 This script verifies that the environment is set up correctly.
 """
 
-import os
-from dotenv import load_dotenv
+import configparser
+from functools import wraps
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 
-# Load environment variables
-load_dotenv()
+# Load configuration
+config = configparser.ConfigParser()
+config.read('config.ini')
 
-TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+TELEGRAM_BOT_TOKEN = config.get('telegram', 'bot_token', fallback=None)
+ALLOWED_USER_IDS = set()
+
+# Parse allowed user IDs
+allowed_ids_str = config.get('telegram', 'allowed_user_ids', fallback='')
+if allowed_ids_str:
+    ALLOWED_USER_IDS = set(int(uid.strip()) for uid in allowed_ids_str.split(',') if uid.strip())
 
 
+def authorized_only(func):
+    """Decorator to restrict command access to authorized users only."""
+    @wraps(func)
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user_id = update.effective_user.id
+
+        # If whitelist is configured, check authorization
+        if ALLOWED_USER_IDS and user_id not in ALLOWED_USER_IDS:
+            await update.message.reply_text('Sorry, you are not authorized to use this bot.')
+            return
+
+        return await func(update, context)
+    return wrapper
+
+
+@authorized_only
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message when the /start command is issued."""
     await update.message.reply_text(
@@ -26,6 +49,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+@authorized_only
 async def hello(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a hello message when the /hello command is issued."""
     user_name = update.effective_user.first_name
@@ -35,8 +59,8 @@ async def hello(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 def main() -> None:
     """Start the bot."""
     if not TELEGRAM_BOT_TOKEN:
-        print("Error: TELEGRAM_BOT_TOKEN not found in .env file")
-        print("Please copy .env.example to .env and add your bot token")
+        print("Error: TELEGRAM_BOT_TOKEN not found in config.ini file")
+        print("Please copy config.ini.example to config.ini and add your bot token")
         return
 
     # Create the Application
@@ -48,6 +72,10 @@ def main() -> None:
 
     # Start the bot
     print("Bot is starting...")
+    if ALLOWED_USER_IDS:
+        print(f"Authorized users: {len(ALLOWED_USER_IDS)} user(s)")
+    else:
+        print("Warning: No user whitelist configured - all users can use the bot")
     print("Press Ctrl+C to stop")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 

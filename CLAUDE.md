@@ -44,10 +44,31 @@ This is a Telegram bot for processing receipt images and financial documents. Th
 
 ## Current State
 
-- Virtual environment created
-- Dependencies identified and listed in requirements.txt
-- Basic hello world bot created for testing
-- Environment variables configured (.env.example)
+- Virtual environment created (Python 3.13)
+- Dependencies installed successfully
+  - `python-telegram-bot==21.10` for Python 3.13 compatibility
+  - `psycopg2-binary==2.9.10` for Python 3.13 compatibility
+- Basic bot with authorization implemented
+  - User whitelist via `allowed_user_ids` in config.ini
+  - `@authorized_only` decorator for command handlers
+- Bot configuration in a file (config.ini.example)
+
+## Development Environment
+
+**Python Version**: 3.13
+**Virtual Environment**: `venv/`
+
+### Running the Bot
+Always use the virtual environment Python interpreter:
+```bash
+./venv/bin/python bot.py
+```
+
+Or activate the environment first:
+```bash
+source venv/bin/activate
+python bot.py
+```
 
 ## Database Schema (Planned)
 
@@ -101,6 +122,22 @@ When ready to continue development:
 4. Design and implement database schema
 5. Add data persistence
 6. Implement Excel export functionality
+
+## Security & Best Practices
+
+### User Authorization
+- **IMPORTANT**: Always use the `@authorized_only` decorator for ALL command handlers and message handlers
+- The decorator checks if the user is in the whitelist (config: `allowed_user_ids`)
+- If no whitelist is configured, all users are allowed (development mode)
+- Unauthorized users receive a rejection message automatically
+
+Example:
+```python
+@authorized_only
+async def my_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # Your command implementation
+    pass
+```
 
 ## Notes
 
