@@ -13,6 +13,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from config import Config
 from database import Database
+from image_processor import ImageProcessor
 
 # Configure logging
 logging.basicConfig(
@@ -153,11 +154,51 @@ async def _process_image(update: Update, context: ContextTypes.DEFAULT_TYPE, is_
 
         logger.info(f"Receipt {receipt_id} created for image {image_id}")
 
-        # Confirm to user
-        await update.message.reply_text(
-            '✅ Image received and saved!\n'
-            '⏳ Processing your receipt...'
+        # Initial confirmation to user
+        status_message = await update.message.reply_text(
+            '✅ Image received!\n'
+            '🔄 Pre-processing image...'
         )
+
+        # Process the image (crop, grayscale, resize)
+        image_processor = context.bot_data.get('image_processor')
+        if image_processor:
+            processed_path = image_processor.process_receipt_image(str(file_path))
+
+            if processed_path:
+                # Get file size of processed image
+                processed_size = os.path.getsize(processed_path)
+
+                # Update database with processed image info
+                db.update_image_processed(image_id, processed_path, processed_size)
+
+                # Update receipt status to 'pre-processed'
+                db.update_receipt_status(receipt_id, 'pre-processed')
+
+                logger.info(f"Image {image_id} processed successfully, receipt {receipt_id} status: pre-processed")
+
+                # Update user with success
+                await status_message.edit_text(
+                    '✅ Image received!\n'
+                    '✅ Pre-processing complete!\n'
+                    '📸 Receipt detected and optimized\n'
+                    '⏳ Ready for AI analysis...'
+                )
+            else:
+                logger.warning(f"Image processing failed for image {image_id}")
+
+                # Update user with fallback
+                await status_message.edit_text(
+                    '✅ Image received!\n'
+                    '⚠️ Using original image\n'
+                    '⏳ Ready for processing...'
+                )
+        else:
+            # No image processor available
+            await status_message.edit_text(
+                '✅ Image received and saved!\n'
+                '⏳ Ready for processing...'
+            )
 
     except Exception as e:
         logger.error(f"Error processing image: {e}")
@@ -182,11 +223,16 @@ def main() -> None:
         logger.error("Could not connect to database. Check your config.ini settings.")
         return
 
+    # Initialize image processor
+    image_processor = ImageProcessor()
+    logger.info("Image processor initialized")
+
     # Create the Application
     application = Application.builder().token(config.telegram_bot_token).build()
 
-    # Store database in bot_data for handlers to access
+    # Store database and image processor in bot_data for handlers to access
     application.bot_data['database'] = db
+    application.bot_data['image_processor'] = image_processor
 
     # Register command handlers
     application.add_handler(CommandHandler("start", start))

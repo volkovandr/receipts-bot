@@ -39,9 +39,10 @@ This is a Telegram bot for processing receipt images and financial documents. Th
 4. ✅ Database connection and schema initialization
 5. ✅ Database schema design (tables for receipts)
 6. ✅ Image handling in bot
-7. ⏳ Claude AI integration for receipt processing
-8. ⏳ Excel report generation
-9. ⏳ User commands and help system
+7. ✅ Image pre-processing
+8. ⏳ Claude AI integration for receipt processing
+9. ⏳ Excel report generation
+10. ⏳ User commands and help system
 
 ## Current State
 
@@ -52,6 +53,7 @@ This is a Telegram bot for processing receipt images and financial documents. Th
   - `psycopg2-binary==2.9.10` for Python 3.13 compatibility
   - `anthropic` for Claude AI integration
   - `openpyxl` for Excel generation
+  - `Pillow==10.4.0`, `opencv-python-headless==4.10.0.84`, `numpy==2.1.3` for image processing
 - ✅ Basic bot with authorization implemented
   - User whitelist via `allowed_user_ids` in config.ini
   - `@authorized_only` decorator for command handlers
@@ -78,6 +80,21 @@ This is a Telegram bot for processing receipt images and financial documents. Th
   - Stores image metadata in database (file_id, path, size, mime_type)
   - Creates receipt record with status 'created' when image is received
   - Links receipt to image and user
+- ✅ **Image pre-processing** (`image_processor.py`)
+  - **Grayscale conversion** - Converts to grayscale first for optimal processing
+  - **Multi-strategy receipt detection and cropping**:
+    - Strategy 1: Edge detection with contour filtering
+    - Strategy 2: Brightness-based detection (best for dark backgrounds)
+    - Strategy 3: Threshold-based detection for white receipts
+  - **Intelligent cropping validation** - Ensures crops are between 20-90% of original area
+  - **Smart resizing** - Reduces to max 1200px height (maintains aspect ratio)
+  - **JPEG compression** - Quality=85 for optimal size/quality balance
+  - **Progressive user feedback** - Updates message after each processing step
+  - Saves processed images to `./images/processed/` directory
+  - Updates database with processed image path and size
+  - Updates receipt status to 'pre-processed' after successful processing
+  - Robust error handling - falls back to original image if all strategies fail
+  - **Performance**: 17-64% file size reduction depending on background type
 - ✅ **User management**
   - `/start` command inserts/updates user in database
   - Uses Telegram username or falls back to first name/full name
@@ -89,11 +106,13 @@ receipts-bot-2/
 ├── bot.py              # Main bot application
 ├── config.py           # Configuration module
 ├── database.py         # Database operations module
+├── image_processor.py  # Image processing module
 ├── schema.sql          # Database schema
 ├── config.ini          # Configuration file (gitignored)
 ├── requirements.txt    # Python dependencies
 ├── images/             # Image storage (gitignored)
-│   └── orig/          # Original uploaded images
+│   ├── orig/          # Original uploaded images
+│   └── processed/     # Pre-processed images (cropped, grayscale, resized)
 └── venv/              # Virtual environment
 ```
 
@@ -145,8 +164,9 @@ The database uses schema `app_receipts_bot` with the following entities:
 3. **receipt** - Processed receipt data
    - References: image, user
    - Contains: merchant, date, time, total amount, currency
-   - Processing status tracking: created → processing → completed/failed
+   - Processing status tracking: created → pre-processed → analyzed → completed/failed
    - Status 'created' is set when image is first received
+   - Status 'pre-processed' is set when image is prepared for AI analysis
    - Stores raw Claude AI response in `raw_data` (JSONB)
 
 4. **receipt_item** - Individual line items from receipts

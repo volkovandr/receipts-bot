@@ -226,3 +226,63 @@ class Database:
             self.connection.rollback()
             logger.error(f"Failed to upsert user: {e}")
             raise
+
+    def update_image_processed(self, image_id: int, processed_file_path: str, processed_file_size: int) -> None:
+        """
+        Update image record with processed file information.
+
+        Args:
+            image_id: ID of the image record
+            processed_file_path: Path to processed image file
+            processed_file_size: Size of processed file in bytes
+        """
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE image
+                    SET processed_file_path = %s,
+                        processed_file_size = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE image_id = %s;
+                    """,
+                    (processed_file_path, processed_file_size, image_id)
+                )
+                self.connection.commit()
+                logger.info(f"Image {image_id} updated with processed file: {processed_file_path}")
+        except psycopg2.Error as e:
+            self.connection.rollback()
+            logger.error(f"Failed to update image: {e}")
+            raise
+
+    def update_receipt_status(self, receipt_id: int, status: str) -> None:
+        """
+        Update receipt processing status.
+
+        Args:
+            receipt_id: ID of the receipt record
+            status: New processing status (e.g., 'pre-processed', 'processing', 'completed', 'failed')
+        """
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE receipt
+                    SET processing_status = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE receipt_id = %s;
+                    """,
+                    (status, receipt_id)
+                )
+                self.connection.commit()
+                logger.info(f"Receipt {receipt_id} status updated to: {status}")
+        except psycopg2.Error as e:
+            self.connection.rollback()
+            logger.error(f"Failed to update receipt status: {e}")
+            raise
