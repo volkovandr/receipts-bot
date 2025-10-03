@@ -70,6 +70,20 @@ source venv/bin/activate
 python bot.py
 ```
 
+**IMPORTANT for Claude Code**: When the user asks to start the bot:
+- Always run it in the background using the Bash tool with `run_in_background: true`
+- This allows Claude to remain interactive and continue working
+- Stop the bot when asked using `pkill -f "python bot.py"` or by finding the process ID
+
+Example:
+```bash
+# Start in background
+./venv/bin/python bot.py  # with run_in_background: true
+
+# Stop when asked
+pkill -f "python bot.py"
+```
+
 ## Database Schema (Planned)
 
 ```sql
