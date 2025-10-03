@@ -4,11 +4,11 @@ Simple Hello World Telegram Bot
 This script verifies that the environment is set up correctly.
 """
 
-import configparser
 import logging
 from functools import wraps
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
+from config import Config
 from database import Database
 
 # Configure logging
@@ -19,23 +19,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Load configuration
-config = configparser.ConfigParser()
-config.read('config.ini')
-
-TELEGRAM_BOT_TOKEN = config.get('telegram', 'bot_token', fallback=None)
-ALLOWED_USER_IDS = set()
-
-# Parse allowed user IDs
-allowed_ids_str = config.get('telegram', 'allowed_user_ids', fallback='')
-if allowed_ids_str:
-    ALLOWED_USER_IDS = set(int(uid.strip()) for uid in allowed_ids_str.split(',') if uid.strip())
-
-# Database configuration
-DB_HOST = config.get('database', 'host', fallback='localhost')
-DB_PORT = config.getint('database', 'port', fallback=5432)
-DB_NAME = config.get('database', 'name', fallback='receipts_db')
-DB_USER = config.get('database', 'user', fallback='')
-DB_PASSWORD = config.get('database', 'password', fallback='')
+config = Config()
 
 
 def authorized_only(func):
@@ -45,7 +29,7 @@ def authorized_only(func):
         user_id = update.effective_user.id
 
         # If whitelist is configured, check authorization
-        if ALLOWED_USER_IDS and user_id not in ALLOWED_USER_IDS:
+        if config.allowed_user_ids and user_id not in config.allowed_user_ids:
             await update.message.reply_text('Sorry, you are not authorized to use this bot.')
             return
 
@@ -74,13 +58,12 @@ async def hello(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 def main() -> None:
     """Start the bot."""
-    if not TELEGRAM_BOT_TOKEN:
-        logger.error("TELEGRAM_BOT_TOKEN not found in config.ini file")
-        logger.info("Please copy config.ini.example to config.ini and add your bot token")
+    # Validate configuration
+    if not config.validate():
         return
 
     # Initialize database
-    db = Database(DB_HOST, DB_PORT, DB_NAME, DB_USER, DB_PASSWORD)
+    db = Database(config.db_host, config.db_port, config.db_name, config.db_user, config.db_password)
     try:
         db.connect()
         db.initialize_schema()
@@ -90,7 +73,7 @@ def main() -> None:
         return
 
     # Create the Application
-    application = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    application = Application.builder().token(config.telegram_bot_token).build()
 
     # Register command handlers
     application.add_handler(CommandHandler("start", start))
@@ -98,8 +81,8 @@ def main() -> None:
 
     # Start the bot
     logger.info("Bot is starting...")
-    if ALLOWED_USER_IDS:
-        logger.info(f"Authorized users: {len(ALLOWED_USER_IDS)} user(s)")
+    if config.allowed_user_ids:
+        logger.info(f"Authorized users: {len(config.allowed_user_ids)} user(s)")
     else:
         logger.warning("No user whitelist configured - all users can use the bot")
     logger.info("Press Ctrl+C to stop")
