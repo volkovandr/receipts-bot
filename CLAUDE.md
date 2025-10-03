@@ -1,0 +1,113 @@
+# Development Notes for Claude AI
+
+## Project Overview
+
+This is a Telegram bot for processing receipt images and financial documents. The bot uses Claude AI for image analysis and text extraction.
+
+## Architecture
+
+### Core Components
+
+1. **Telegram Bot Interface** (`python-telegram-bot`)
+   - Handles user interactions
+   - Receives images from users
+   - Sends responses and generated files
+
+2. **Claude AI Integration** (`anthropic`)
+   - Processes receipt images
+   - Extracts structured data (date, store, items, prices, total)
+   - Returns JSON-formatted results
+
+3. **PostgreSQL Database** (`psycopg2-binary`)
+   - Stores receipt data
+   - User information
+   - Transaction history
+
+4. **Excel Generator** (`openpyxl`)
+   - Creates formatted Excel reports
+   - Generates summaries and analytics
+
+## Development Strategy
+
+**IMPORTANT**: Features are being implemented incrementally, one at a time. Do not implement everything at once.
+
+### Implementation Order
+
+1. ✅ Environment setup
+2. ⏳ Basic bot structure with image handling
+3. ⏳ Claude AI integration for receipt processing
+4. ⏳ Database schema and connection
+5. ⏳ Data storage functionality
+6. ⏳ Excel report generation
+7. ⏳ Error handling and logging
+8. ⏳ User commands and help system
+
+## Current State
+
+- Virtual environment created
+- Dependencies identified and listed in requirements.txt
+- Basic hello world bot created for testing
+- Environment variables configured (.env.example)
+
+## Database Schema (Planned)
+
+```sql
+-- Users table
+CREATE TABLE users (
+    user_id BIGINT PRIMARY KEY,
+    username VARCHAR(255),
+    first_name VARCHAR(255),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Receipts table
+CREATE TABLE receipts (
+    receipt_id SERIAL PRIMARY KEY,
+    user_id BIGINT REFERENCES users(user_id),
+    image_file_id VARCHAR(255),
+    store_name VARCHAR(255),
+    receipt_date DATE,
+    total_amount DECIMAL(10, 2),
+    currency VARCHAR(10),
+    processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    raw_data JSONB
+);
+
+-- Receipt items table
+CREATE TABLE receipt_items (
+    item_id SERIAL PRIMARY KEY,
+    receipt_id INTEGER REFERENCES receipts(receipt_id) ON DELETE CASCADE,
+    item_name VARCHAR(255),
+    quantity DECIMAL(10, 3),
+    unit_price DECIMAL(10, 2),
+    total_price DECIMAL(10, 2)
+);
+```
+
+## Claude AI Prompt Strategy (Planned)
+
+The bot will use Claude's vision capabilities to analyze receipt images. The prompt should:
+- Request structured JSON output
+- Specify fields to extract (store, date, items, prices, total)
+- Handle various receipt formats
+- Deal with poor image quality gracefully
+
+## Next Steps
+
+When ready to continue development:
+1. Implement image handling in the bot
+2. Set up Claude AI integration with vision API
+3. Test receipt processing with sample images
+4. Design and implement database schema
+5. Add data persistence
+6. Implement Excel export functionality
+
+## Notes
+
+- Keep error messages user-friendly
+- Log all errors for debugging
+- Handle rate limits for both Telegram and Claude APIs
+- Consider adding receipt image preprocessing (rotation, contrast adjustment)
+- Future: Add support for multiple currencies
+- Future: Category classification for items
+- Future: Monthly/weekly spending summaries

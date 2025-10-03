@@ -1,0 +1,17 @@
+# Telegram Bot
+python-telegram-bot==20.7
+
+# Claude AI
+anthropic==0.39.0
+
+# Database
+psycopg2-binary==2.9.9
+
+# Excel generation
+openpyxl==3.1.2
+
+# Image processing
+Pillow==10.4.0
+
+# Environment variables
+python-dotenv==1.0.0
