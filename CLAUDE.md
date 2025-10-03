@@ -34,24 +34,68 @@ This is a Telegram bot for processing receipt images and financial documents. Th
 ### Implementation Order
 
 1. ✅ Environment setup
-2. ⏳ Basic bot structure with image handling
-3. ⏳ Claude AI integration for receipt processing
-4. ⏳ Database schema and connection
-5. ⏳ Data storage functionality
-6. ⏳ Excel report generation
-7. ⏳ Error handling and logging
-8. ⏳ User commands and help system
+2. ✅ Basic bot structure (commands working)
+3. ✅ Configuration module
+4. ✅ Database connection and schema initialization
+5. ✅ Database schema design (tables for receipts)
+6. ✅ Image handling in bot
+7. ⏳ Claude AI integration for receipt processing
+8. ⏳ Excel report generation
+9. ⏳ User commands and help system
 
 ## Current State
 
-- Virtual environment created (Python 3.13)
-- Dependencies installed successfully
+### Completed Features
+- ✅ Virtual environment created (Python 3.13)
+- ✅ Dependencies installed successfully
   - `python-telegram-bot==21.10` for Python 3.13 compatibility
   - `psycopg2-binary==2.9.10` for Python 3.13 compatibility
-- Basic bot with authorization implemented
+  - `anthropic` for Claude AI integration
+  - `openpyxl` for Excel generation
+- ✅ Basic bot with authorization implemented
   - User whitelist via `allowed_user_ids` in config.ini
   - `@authorized_only` decorator for command handlers
-- Bot configuration in a file (config.ini.example)
+  - `/start` and `/hello` commands working
+- ✅ **Configuration module** (`config.py`)
+  - Centralized configuration management
+  - Loads from config.ini file
+  - Handles Telegram, Database, and Anthropic settings
+  - Built-in validation logic
+- ✅ **Database integration** (`database.py`)
+  - PostgreSQL connection management
+  - Automatic schema initialization from schema.sql on startup
+  - Uses dedicated schema: `app_receipts_bot`
+  - Table existence checking (prevents re-initialization)
+  - Proper error handling and logging
+- ✅ **Database schema** (`schema.sql`)
+  - Schema created: `app_receipts_bot`
+  - Version tracking table implemented
+  - Complete data model with 5 tables: user, image, receipt, receipt_item, category
+- ✅ **Image handling** (`bot.py`)
+  - Handles both photo messages (camera) and document messages (gallery)
+  - Downloads images to `./images/orig/` directory
+  - Generates unique filenames: `{user_id}_{timestamp}.{ext}`
+  - Stores image metadata in database (file_id, path, size, mime_type)
+  - Creates receipt record with status 'created' when image is received
+  - Links receipt to image and user
+- ✅ **User management**
+  - `/start` command inserts/updates user in database
+  - Uses Telegram username or falls back to first name/full name
+  - Updates username if changed on subsequent `/start` commands
+
+### Project Structure
+```
+receipts-bot-2/
+├── bot.py              # Main bot application
+├── config.py           # Configuration module
+├── database.py         # Database operations module
+├── schema.sql          # Database schema
+├── config.ini          # Configuration file (gitignored)
+├── requirements.txt    # Python dependencies
+├── images/             # Image storage (gitignored)
+│   └── orig/          # Original uploaded images
+└── venv/              # Virtual environment
+```
 
 ## Development Environment
 
@@ -84,40 +128,37 @@ Example:
 pkill -f "python bot.py"
 ```
 
-## Database Schema (Planned)
+## Database Schema
 
-```sql
--- Users table
-CREATE TABLE users (
-    user_id BIGINT PRIMARY KEY,
-    username VARCHAR(255),
-    first_name VARCHAR(255),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+The database uses schema `app_receipts_bot` with the following entities:
 
--- Receipts table
-CREATE TABLE receipts (
-    receipt_id SERIAL PRIMARY KEY,
-    user_id BIGINT REFERENCES users(user_id),
-    image_file_id VARCHAR(255),
-    store_name VARCHAR(255),
-    receipt_date DATE,
-    total_amount DECIMAL(10, 2),
-    currency VARCHAR(10),
-    processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    raw_data JSONB
-);
+1. **user** - Telegram users interacting with the bot
+   - Primary key: `user_id` (Telegram user ID)
+   - Tracks username, timestamps
 
--- Receipt items table
-CREATE TABLE receipt_items (
-    item_id SERIAL PRIMARY KEY,
-    receipt_id INTEGER REFERENCES receipts(receipt_id) ON DELETE CASCADE,
-    item_name VARCHAR(255),
-    quantity DECIMAL(10, 3),
-    unit_price DECIMAL(10, 2),
-    total_price DECIMAL(10, 2)
-);
-```
+2. **image** - Uploaded receipt images
+   - Stores both original and processed file paths
+   - References: user
+   - Contains Telegram `file_id` for re-downloading
+   - Tracks file size, mime type
+
+3. **receipt** - Processed receipt data
+   - References: image, user
+   - Contains: merchant, date, time, total amount, currency
+   - Processing status tracking: created → processing → completed/failed
+   - Status 'created' is set when image is first received
+   - Stores raw Claude AI response in `raw_data` (JSONB)
+
+4. **receipt_item** - Individual line items from receipts
+   - References: receipt, category (optional)
+   - Contains: item name, quantity, unit price, total price
+
+5. **category** - Item categories for expense tracking
+   - Used to classify receipt items (groceries, utilities, etc.)
+   - Assigned to individual items, not whole receipts
+
+All tables include `created_at` and `updated_at` timestamps (TIMESTAMPTZ).
+Full schema definition in [schema.sql](schema.sql).
 
 ## Claude AI Prompt Strategy (Planned)
 
@@ -130,12 +171,11 @@ The bot will use Claude's vision capabilities to analyze receipt images. The pro
 ## Next Steps
 
 When ready to continue development:
-1. Implement image handling in the bot
-2. Set up Claude AI integration with vision API
-3. Test receipt processing with sample images
-4. Design and implement database schema
-5. Add data persistence
-6. Implement Excel export functionality
+1. Set up Claude AI integration with vision API
+2. Process receipt images and extract data
+3. Update receipt records with extracted data
+4. Implement Excel export functionality
+5. Add user commands for viewing and exporting receipts
 
 ## Security & Best Practices
 

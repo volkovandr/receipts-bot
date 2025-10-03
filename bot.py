@@ -5,9 +5,12 @@ This script verifies that the environment is set up correctly.
 """
 
 import logging
+import os
 from functools import wraps
+from pathlib import Path
+from datetime import datetime
 from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from config import Config
 from database import Database
 
@@ -20,6 +23,9 @@ logger = logging.getLogger(__name__)
 
 # Load configuration
 config = Config()
+
+# Image storage directory
+IMAGES_DIR = Path("images/orig")
 
 
 def authorized_only(func):
@@ -40,6 +46,20 @@ def authorized_only(func):
 @authorized_only
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message when the /start command is issued."""
+    # Save/update user in database
+    user_id = update.effective_user.id
+    # Use username if available, otherwise use first name or full name
+    username = (update.effective_user.username or
+                update.effective_user.first_name or
+                update.effective_user.full_name)
+
+    db = context.bot_data.get('database')
+    if db:
+        try:
+            db.upsert_user(user_id, username)
+        except Exception as e:
+            logger.error(f"Failed to upsert user on /start: {e}")
+
     await update.message.reply_text(
         'Hello! I am your receipts bot. 🤖\n'
         'The environment is working correctly!\n\n'
@@ -54,6 +74,96 @@ async def hello(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a hello message when the /hello command is issued."""
     user_name = update.effective_user.first_name
     await update.message.reply_text(f'Hello {user_name}! 👋')
+
+
+@authorized_only
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle receipt photos sent by users (camera images)."""
+    await _process_image(update, context, is_document=False)
+
+
+@authorized_only
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle receipt photos sent as documents (gallery images)."""
+    # Only process image documents
+    if update.message.document.mime_type and update.message.document.mime_type.startswith('image/'):
+        await _process_image(update, context, is_document=True)
+    else:
+        await update.message.reply_text('Please send image files only.')
+
+
+async def _process_image(update: Update, context: ContextTypes.DEFAULT_TYPE, is_document: bool) -> None:
+    """
+    Process and save receipt image.
+
+    Args:
+        update: Telegram update object
+        context: Telegram context
+        is_document: True if image was sent as document, False if sent as photo
+    """
+    try:
+        # Get the file object
+        if is_document:
+            file = await update.message.document.get_file()
+            file_size = update.message.document.file_size
+            mime_type = update.message.document.mime_type
+        else:
+            # For photos, get the largest available size
+            photo = update.message.photo[-1]
+            file = await photo.get_file()
+            file_size = photo.file_size
+            mime_type = 'image/jpeg'
+
+        # Create images directory if it doesn't exist
+        IMAGES_DIR.mkdir(parents=True, exist_ok=True)
+
+        # Generate unique filename
+        user_id = update.effective_user.id
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        file_extension = Path(file.file_path).suffix or '.jpg'
+        filename = f"{user_id}_{timestamp}{file_extension}"
+        file_path = IMAGES_DIR / filename
+
+        # Download and save the file
+        await file.download_to_drive(file_path)
+        logger.info(f"Image saved: {file_path}")
+
+        # Get database connection from context
+        db = context.bot_data.get('database')
+        if not db:
+            logger.error("Database connection not available")
+            await update.message.reply_text('Error: Database not available.')
+            return
+
+        # Save image metadata to database
+        image_id = db.insert_image(
+            user_id=user_id,
+            telegram_file_id=file.file_id,
+            file_path=str(file_path),
+            file_size=file_size,
+            mime_type=mime_type
+        )
+
+        # Create receipt record with status 'created'
+        receipt_id = db.insert_receipt(
+            image_id=image_id,
+            user_id=user_id,
+            status='created'
+        )
+
+        logger.info(f"Receipt {receipt_id} created for image {image_id}")
+
+        # Confirm to user
+        await update.message.reply_text(
+            '✅ Image received and saved!\n'
+            '⏳ Processing your receipt...'
+        )
+
+    except Exception as e:
+        logger.error(f"Error processing image: {e}")
+        await update.message.reply_text(
+            '❌ Sorry, there was an error processing your image. Please try again.'
+        )
 
 
 def main() -> None:
@@ -75,9 +185,16 @@ def main() -> None:
     # Create the Application
     application = Application.builder().token(config.telegram_bot_token).build()
 
+    # Store database in bot_data for handlers to access
+    application.bot_data['database'] = db
+
     # Register command handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("hello", hello))
+
+    # Register message handlers
+    application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    application.add_handler(MessageHandler(filters.Document.IMAGE, handle_document))
 
     # Start the bot
     logger.info("Bot is starting...")
