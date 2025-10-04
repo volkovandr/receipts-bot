@@ -12,9 +12,16 @@ from config import Config
 from database import Database
 from services.image_processor import ImageProcessor
 from services.claude_service import ClaudeService
-from handlers.commands import start, hello
+from handlers.commands import start, hello, receipts
 from handlers.images import handle_photo, handle_document
-from handlers.callbacks import handle_view_image_callback, handle_delete_receipt_callback
+from handlers.callbacks import (
+    handle_view_items_callback, handle_view_image_callback, handle_delete_receipt_callback,
+    handle_edit_receipt_callback, handle_delete_item_callback,
+    handle_edit_amount_callback, handle_edit_category_callback,
+    handle_category_select_callback, handle_category_create_callback,
+    handle_back_to_summary_callback, handle_cancel_edit_callback
+)
+from handlers.messages import handle_text_message
 
 # Configure logging
 logging.basicConfig(
@@ -86,20 +93,33 @@ def main() -> None:
     # Wrap handlers with authorization decorator
     authorized_start = authorized_only(start)
     authorized_hello = authorized_only(hello)
+    authorized_receipts = authorized_only(receipts)
     authorized_photo = authorized_only(handle_photo)
     authorized_document = authorized_only(handle_document)
 
     # Register command handlers
     application.add_handler(CommandHandler("start", authorized_start))
     application.add_handler(CommandHandler("hello", authorized_hello))
+    application.add_handler(CommandHandler("receipts", authorized_receipts))
 
     # Register callback query handlers
+    application.add_handler(CallbackQueryHandler(handle_view_items_callback, pattern="^view_items_"))
     application.add_handler(CallbackQueryHandler(handle_view_image_callback, pattern="^view_image_"))
     application.add_handler(CallbackQueryHandler(handle_delete_receipt_callback, pattern="^delete_receipt_"))
+    application.add_handler(CallbackQueryHandler(handle_edit_receipt_callback, pattern="^edit_receipt_"))
+    application.add_handler(CallbackQueryHandler(handle_delete_item_callback, pattern="^del_item_"))
+    application.add_handler(CallbackQueryHandler(handle_edit_amount_callback, pattern="^edit_amt_"))
+    application.add_handler(CallbackQueryHandler(handle_edit_category_callback, pattern="^edit_cat_"))
+    application.add_handler(CallbackQueryHandler(handle_category_select_callback, pattern="^select_cat_"))
+    application.add_handler(CallbackQueryHandler(handle_category_create_callback, pattern="^create_cat_"))
+    application.add_handler(CallbackQueryHandler(handle_back_to_summary_callback, pattern="^back_summary_"))
+    application.add_handler(CallbackQueryHandler(handle_cancel_edit_callback, pattern="^cancel_edit"))
 
     # Register message handlers
     application.add_handler(MessageHandler(filters.PHOTO, authorized_photo))
     application.add_handler(MessageHandler(filters.Document.IMAGE, authorized_document))
+    # Text message handler for editing workflows (must be registered AFTER specific handlers)
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
 
     # Start the bot
     logger.info("Bot is starting...")

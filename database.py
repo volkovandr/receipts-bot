@@ -87,6 +87,14 @@ class Database:
         """Get categories that have AI notes defined."""
         return self.category_repo.get_categories_with_notes()
 
+    def search_categories_fuzzy(self, search_term: str, similarity_threshold: float = 0.3) -> list[tuple[int, str]]:
+        """Search categories using fuzzy matching."""
+        return self.category_repo.search_categories_fuzzy(search_term, similarity_threshold)
+
+    def create_category(self, category_name: str, description: str = None) -> int:
+        """Create a new category."""
+        return self.category_repo.create_category(category_name, description)
+
     # Merchant operations
     def insert_or_get_merchant(self, name: str, city: str = None, country: str = None,
                                 address: str = None, logo_description: str = None) -> int:
@@ -151,3 +159,23 @@ class Database:
     def get_receipt_processed_image_path(self, receipt_id: int, user_id: int = None) -> str | None:
         """Get processed image path for a receipt."""
         return self.receipt_repo.get_receipt_processed_image_path(receipt_id, user_id)
+
+    def get_receipt_items_detailed(self, receipt_id: int, user_id: int = None) -> list[dict]:
+        """Get detailed list of receipt items."""
+        return self.receipt_repo.get_receipt_items_detailed(receipt_id, user_id)
+
+    def mark_item_as_deleted(self, item_id: int, receipt_id: int, user_id: int = None) -> bool:
+        """Mark receipt item as deleted (soft delete)."""
+        return self.receipt_repo.mark_item_as_deleted(item_id, receipt_id, user_id)
+
+    def update_item_amount(self, item_id: int, receipt_id: int, new_amount: float, user_id: int = None) -> bool:
+        """Update receipt item total price."""
+        return self.receipt_repo.update_item_amount(item_id, receipt_id, new_amount, user_id)
+
+    def update_item_category(self, item_id: int, receipt_id: int, category_id: int, user_id: int = None) -> bool:
+        """Update receipt item category."""
+        return self.receipt_repo.update_item_category(item_id, receipt_id, category_id, user_id)
+
+    def get_receipt_summary_data(self, receipt_id: int, user_id: int = None) -> dict | None:
+        """Get receipt summary data for formatting."""
+        return self.receipt_repo.get_receipt_summary_data(receipt_id, user_id)

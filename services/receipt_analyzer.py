@@ -2,7 +2,7 @@
 Receipt analysis service using Claude AI.
 """
 import logging
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+from services.receipt_formatter import format_receipt_summary
 
 logger = logging.getLogger(__name__)
 
@@ -114,53 +114,19 @@ async def analyze_receipt_with_claude(context, db, receipt_id, image_id, image_p
         logger.info(f"Receipt {receipt_id} analyzed successfully: {len(items)} items, "
                    f"status: {extraction_status}, consistent: {is_consistent}")
 
-        # Get category breakdown
-        category_breakdown = db.get_receipt_items_by_category(receipt_id)
-        currency = transaction_data.get("currency", "EUR")
+        # Get user ID for authorization
+        user_id = status_message.chat.id
 
-        # Prepare success message
-        success_text = (
-            '✅ Analysis complete!\n\n'
-            f'🏪 Merchant: {merchant_data.get("name", "Unknown")}\n'
-            f'📅 Date: {transaction_data.get("date", "N/A")}\n'
-            f'📝 Items: {len(items)}\n'
-        )
-
-        # Add category breakdown
-        if category_breakdown:
-            success_text += '\n💶 Breakdown by category:\n'
-            for category_name, item_count, total_amount in category_breakdown:
-                success_text += f'  • {category_name}: {total_amount:.2f} {currency} ({item_count} item{"s" if item_count > 1 else ""})\n'
-
-        # Add grand total
-        success_text += f'\n💰 Grand Total: {transaction_data.get("brutto_amount", "N/A")} {currency}\n'
-
-        # Add consistency warning
-        if not is_consistent and receipt_total is not None:
-            success_text += (
-                f'\n⚠️ Total mismatch detected!\n'
-                f'   Receipt total: {receipt_total:.2f}\n'
-                f'   Items sum: {items_sum:.2f}\n'
-                f'   Difference: {abs(float(receipt_total) - items_sum):.2f}\n'
+        # Format receipt summary using the formatter
+        try:
+            success_text, reply_markup = format_receipt_summary(db, receipt_id, user_id)
+            await status_message.edit_text(success_text, reply_markup=reply_markup)
+        except ValueError as e:
+            logger.error(f"Failed to format receipt summary: {e}")
+            await status_message.edit_text(
+                '✅ Analysis complete but failed to generate summary!\n'
+                f'Receipt ID: {receipt_id}'
             )
-
-        # Add warnings if there are uncertain fields or clarifications needed
-        if uncertain_fields:
-            success_text += f'\n⚠️ Uncertain fields: {", ".join(uncertain_fields)}'
-
-        if need_clarification:
-            success_text += '\n\n❓ Needs clarification:\n'
-            for item in need_clarification:
-                success_text += f'  • {item.get("name")}: {item.get("reason")}\n'
-
-        # Add inline buttons: view processed image and delete
-        keyboard = [
-            [InlineKeyboardButton("🔍 View processed image", callback_data=f"view_image_{receipt_id}")],
-            [InlineKeyboardButton("🗑️ Delete this receipt", callback_data=f"delete_receipt_{receipt_id}")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        await status_message.edit_text(success_text, reply_markup=reply_markup)
 
     except ValueError as e:
         # Handle specific validation errors (like refusals) with custom messages

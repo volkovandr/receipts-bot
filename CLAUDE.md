@@ -152,6 +152,21 @@ This is a Telegram bot for processing receipt images and financial documents. Th
   - Example: "Use Child: Food for Haribo Bears instead of Food: Sweets"
   - Notes fetched via `get_categories_with_notes()` and passed to Claude
   - Prompt emphasizes prioritizing category-specific notes over general logic
+- ✅ **Receipt Editing Feature** (`handlers/callbacks.py`, `handlers/messages.py`, `services/receipt_formatter.py`)
+  - **View Items button**: Read-only display of all receipt items (no button limit issues)
+  - **Edit Receipt button**: Paginated interface showing ONE item at a time
+  - **Pagination**: Previous/Next buttons to navigate between items (works with 30+ items)
+  - **Delete items**: Soft delete with `is_deleted` flag, returns to edit view
+  - **Edit amounts**: Conversational flow, validates input (0.01-99999.99), returns to edit view
+  - **Change categories**: Fuzzy search with 30% similarity threshold using pg_trgm
+  - **Create categories**: Users can create new categories on-the-fly (title-cased)
+  - **Total consistency**: Compares original receipt total with non-deleted items sum
+  - **Receipt formatter**: Reusable summary generation in `services/receipt_formatter.py`
+  - **Smart navigation**: Edit operations return to item view; only "Back to summary" exits to summary
+  - **Conversation state**: Uses `context.user_data` for multi-step editing flows
+  - **Authorization**: All operations verify user ownership at SQL and application level
+  - **Recovery command**: `/receipts` command to retrieve lost receipts
+  - Database migration: `migrations/001_add_receipt_item_is_deleted.sql`
 
 ### Project Structure
 ```
@@ -167,12 +182,14 @@ receipts-bot-2/
 ├── handlers/               # Telegram bot handlers (Telegram interaction layer)
 │   ├── commands.py        # Command handlers (/start, /hello)
 │   ├── images.py          # Image upload handlers (photo & document)
-│   └── callbacks.py       # Inline button callback handlers
+│   ├── callbacks.py       # Inline button callback handlers (view, edit, delete)
+│   └── messages.py        # Text message handlers (editing workflows)
 │
 ├── services/               # Business logic layer
-│   ├── claude_service.py  # Claude AI integration
-│   ├── image_processor.py # Image pre-processing
-│   └── receipt_analyzer.py # Receipt analysis orchestration
+│   ├── claude_service.py    # Claude AI integration
+│   ├── image_processor.py   # Image pre-processing
+│   ├── receipt_analyzer.py  # Receipt analysis orchestration
+│   └── receipt_formatter.py # Receipt summary formatting (reusable)
 │
 ├── repositories/           # Data access layer (Repository pattern)
 │   ├── database_connection.py    # Connection & schema management
@@ -314,6 +331,8 @@ The database uses schema `app_receipts_bot` with the following entities:
 8. **receipt_item** - Individual line items from receipts
    - References: receipt, category (optional)
    - Contains: item name, article_number, quantity, unit price, total price
+   - **Soft delete**: `is_deleted` boolean field (default: FALSE) for user edits
+   - `updated_at` tracked for audit trail
 
 All tables include `created_at` and `updated_at` timestamps (TIMESTAMPTZ).
 Full schema definition in [schema.sql](schema.sql).

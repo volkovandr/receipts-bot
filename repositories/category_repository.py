@@ -88,3 +88,83 @@ class CategoryRepository:
         except psycopg2.Error as e:
             logger.error(f"Failed to retrieve categories with notes: {e}")
             raise
+
+    def search_categories_fuzzy(self, search_term: str, similarity_threshold: float = 0.3) -> list[tuple[int, str]]:
+        """
+        Search categories using fuzzy matching (case-insensitive).
+
+        Uses PostgreSQL pg_trgm extension for trigram similarity matching.
+
+        Args:
+            search_term: Search keyword(s)
+            similarity_threshold: Minimum similarity score (0.0-1.0), default 0.3
+
+        Returns:
+            List of tuples (category_id, category_name) ordered by similarity (best match first)
+        """
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT category_id, category_name,
+                           SIMILARITY(LOWER(category_name), LOWER(%s)) as sim
+                    FROM category
+                    WHERE SIMILARITY(LOWER(category_name), LOWER(%s)) > %s
+                    ORDER BY sim DESC
+                    LIMIT 10;
+                    """,
+                    (search_term, search_term, similarity_threshold)
+                )
+                results = cursor.fetchall()
+                matches = [(row[0], row[1]) for row in results]
+                logger.debug(f"Found {len(matches)} category matches for '{search_term}'")
+                return matches
+        except psycopg2.Error as e:
+            logger.error(f"Failed to search categories: {e}")
+            raise
+
+    def create_category(self, category_name: str, description: str = None) -> int:
+        """
+        Create a new category.
+
+        Args:
+            category_name: Name of the category (will be title-cased)
+            description: Optional description
+
+        Returns:
+            category_id of the newly created category
+
+        Raises:
+            psycopg2.IntegrityError: If category name already exists
+        """
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+
+        # Title-case the category name for consistency
+        category_name = category_name.strip().title()
+
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO category (category_name, description)
+                    VALUES (%s, %s)
+                    RETURNING category_id;
+                    """,
+                    (category_name, description)
+                )
+                category_id = cursor.fetchone()[0]
+                self.connection.commit()
+                logger.info(f"Created new category: '{category_name}' with ID {category_id}")
+                return category_id
+        except psycopg2.IntegrityError as e:
+            self.connection.rollback()
+            logger.warning(f"Category '{category_name}' already exists")
+            raise
+        except psycopg2.Error as e:
+            self.connection.rollback()
+            logger.error(f"Failed to create category: {e}")
+            raise

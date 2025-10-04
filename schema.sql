@@ -103,6 +103,7 @@ CREATE TABLE receipt_item (
     quantity NUMERIC,
     unit_price NUMERIC,
     total_price NUMERIC,
+    is_deleted BOOLEAN DEFAULT FALSE,  -- soft delete flag for user edits
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
@@ -121,3 +122,29 @@ CREATE INDEX idx_receipt_item_category_id ON receipt_item(category_id);
 CREATE INDEX idx_image_user_id ON image(user_id);
 
 --------
+
+CREATE VIEW v_receipt_summary AS
+SELECT
+    r.receipt_id,
+    t.date AS transaction_date,
+    r.merchant_id,
+    m.name AS merchant_name,
+    m.city AS merchant_city,
+    t.brutto_amount,
+    COUNT(ri.item_id) AS item_count,
+    SUM(ri.total_price) AS total_items_price,
+    r.transaction_id,
+    r.processing_status,
+    SUM(ri.total_price) - t.brutto_amount AS price_difference
+FROM
+    receipt r
+LEFT JOIN
+    merchant m ON r.merchant_id = m.merchant_id
+LEFT JOIN
+    transaction t ON r.transaction_id = t.transaction_id
+LEFT JOIN
+    receipt_item ri ON r.receipt_id = ri.receipt_id
+WHERE
+    r.is_deleted = FALSE AND ri.is_deleted = FALSE
+GROUP BY
+    r.receipt_id, m.name, m.city, t.date, t.brutto_amount;
