@@ -31,6 +31,8 @@ class Config:
 
         # Anthropic configuration
         self.anthropic_api_key = self.config.get('anthropic', 'api_key', fallback=None)
+        self.anthropic_prompt_template = self.config.get('anthropic', 'prompt_template', fallback='prompt-combined.txt')
+        self.anthropic_model = self.config.get('anthropic', 'model', fallback='claude-sonnet-4-5-20250929')
 
     def _parse_allowed_user_ids(self) -> Set[int]:
         """Parse allowed user IDs from config."""

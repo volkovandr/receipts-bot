@@ -40,7 +40,7 @@ This is a Telegram bot for processing receipt images and financial documents. Th
 5. ✅ Database schema design (tables for receipts)
 6. ✅ Image handling in bot
 7. ✅ Image pre-processing
-8. ⏳ Claude AI integration for receipt processing
+8. ✅ Claude AI integration for receipt processing
 9. ⏳ Excel report generation
 10. ⏳ User commands and help system
 
@@ -99,6 +99,14 @@ This is a Telegram bot for processing receipt images and financial documents. Th
   - `/start` command inserts/updates user in database
   - Uses Telegram username or falls back to first name/full name
   - Updates username if changed on subsequent `/start` commands
+- ✅ **Claude AI Integration** (`claude_service.py`)
+  - Vision API integration with configurable model selection
+  - Automatic prompt template loading with category injection
+  - Extracts structured data: merchant, transaction, items with categories
+  - Returns token usage (input/output) for cost tracking
+  - Handles markdown code blocks in responses
+  - Robust error handling for API failures and refusals
+  - Graceful handling of content policy refusals (QR codes, tax IDs, etc.)
 
 ### Project Structure
 ```
@@ -107,7 +115,9 @@ receipts-bot-2/
 ├── config.py           # Configuration module
 ├── database.py         # Database operations module
 ├── image_processor.py  # Image processing module
+├── claude_service.py   # Claude AI integration module
 ├── schema.sql          # Database schema
+├── prompt.txt          # Claude AI prompt template
 ├── config.ini          # Configuration file (gitignored)
 ├── requirements.txt    # Python dependencies
 ├── images/             # Image storage (gitignored)
@@ -155,47 +165,89 @@ The database uses schema `app_receipts_bot` with the following entities:
    - Primary key: `user_id` (Telegram user ID)
    - Tracks username, timestamps
 
-2. **image** - Uploaded receipt images
+2. **category** - Item categories for expense tracking (71 predefined categories)
+   - Used to classify receipt items (groceries, utilities, car expenses, etc.)
+   - Assigned to individual items, not whole receipts
+
+3. **merchant** - Store/business information
+   - Contains: name, city, country, address, logo_description
+   - Normalized to avoid duplication
+
+4. **image** - Uploaded receipt images
    - Stores both original and processed file paths
    - References: user
    - Contains Telegram `file_id` for re-downloading
    - Tracks file size, mime type
 
-3. **receipt** - Processed receipt data
-   - References: image, user
-   - Contains: merchant, date, time, total amount, currency
-   - Processing status tracking: created → pre-processed → analyzed → completed/failed
+5. **transaction** - Financial transaction details
+   - Contains: date, time, currency, amounts (net, vat, brutto)
+   - Payment information: method, card number (last 4 digits)
+
+6. **ai_analysis** - Claude AI processing results
+   - Tracks: model_name, extraction_status, input/output tokens
+   - Stores raw JSON response for debugging/reprocessing
+   - Records error messages for failed analyses
+   - **Token tracking**: Records input_tokens and output_tokens for cost monitoring
+
+7. **receipt** - Receipt records
+   - References: image, user, merchant, transaction, ai_analysis
+   - Processing status tracking: created → pre-processed → processing → completed/failed
    - Status 'created' is set when image is first received
    - Status 'pre-processed' is set when image is prepared for AI analysis
-   - Stores raw Claude AI response in `raw_data` (JSONB)
+   - Status 'completed' is set after successful AI analysis
 
-4. **receipt_item** - Individual line items from receipts
+8. **receipt_item** - Individual line items from receipts
    - References: receipt, category (optional)
-   - Contains: item name, quantity, unit price, total price
-
-5. **category** - Item categories for expense tracking
-   - Used to classify receipt items (groceries, utilities, etc.)
-   - Assigned to individual items, not whole receipts
+   - Contains: item name, article_number, quantity, unit price, total price
 
 All tables include `created_at` and `updated_at` timestamps (TIMESTAMPTZ).
 Full schema definition in [schema.sql](schema.sql).
 
-## Claude AI Prompt Strategy (Planned)
+## Claude AI Integration Details
 
-The bot will use Claude's vision capabilities to analyze receipt images. The prompt should:
-- Request structured JSON output
-- Specify fields to extract (store, date, items, prices, total)
-- Handle various receipt formats
-- Deal with poor image quality gracefully
+### Prompt Strategy
+The bot uses Claude's vision capabilities to analyze receipt images. The prompt (stored in `prompt.txt`):
+- Requests structured JSON output
+- Extracts: merchant info, transaction details, all items with prices
+- Assigns categories from the predefined list (71 categories injected into prompt)
+- Handles tax IDs, QR codes, payment information
+- Marks uncertain fields for user review
+- Supports multiple languages (keeps item names in original language)
+
+### Model Configuration
+- **Configurable model**: Set via `config.ini` → `[anthropic]` → `model`
+- **Default**: `claude-sonnet-4-5-20250929`
+- **Token tracking**: All API calls log input/output tokens to database and console
+- **Cost monitoring**: Token usage stored in `ai_analysis` table for analytics
+
+### Error Handling
+- **Refusal handling**: Detects when Claude refuses to process images (sensitive data, QR codes, tax IDs)
+- **User feedback**: Provides specific guidance when analysis fails
+- **Database tracking**: All failures recorded with error messages in `ai_analysis` table
+- **Fallback**: Original images used if pre-processing fails
+
+### Processing Flow
+1. User uploads receipt image
+2. Image pre-processed (cropped, grayscale, resized)
+3. Claude analyzes with vision API (model configurable)
+4. Response parsed and validated (handles markdown code blocks)
+5. Data saved to database:
+   - AI analysis record (with tokens)
+   - Merchant record (normalized)
+   - Transaction record (financial details)
+   - Receipt items (with category assignments)
+6. User receives summary with warnings for uncertain fields
 
 ## Next Steps
 
 When ready to continue development:
-1. Set up Claude AI integration with vision API
-2. Process receipt images and extract data
-3. Update receipt records with extracted data
+1. ✅ ~~Set up Claude AI integration with vision API~~
+2. ✅ ~~Process receipt images and extract data~~
+3. ✅ ~~Update receipt records with extracted data~~
 4. Implement Excel export functionality
 5. Add user commands for viewing and exporting receipts
+6. Add user feedback flow for uncertain/missing data
+7. Implement analytics and reporting
 
 ## Security & Best Practices
 

@@ -286,3 +286,258 @@ class Database:
             self.connection.rollback()
             logger.error(f"Failed to update receipt status: {e}")
             raise
+
+    def get_all_categories(self) -> list:
+        """
+        Get all category names from database.
+
+        Returns:
+            List of category names (strings)
+        """
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute("SELECT category_name FROM category ORDER BY category_name;")
+                categories = [row[0] for row in cursor.fetchall()]
+                logger.debug(f"Retrieved {len(categories)} categories from database")
+                return categories
+        except psycopg2.Error as e:
+            logger.error(f"Failed to retrieve categories: {e}")
+            raise
+
+    def get_category_id_by_name(self, category_name: str) -> int | None:
+        """
+        Get category ID by name.
+
+        Args:
+            category_name: Name of the category
+
+        Returns:
+            category_id or None if not found
+        """
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT category_id FROM category WHERE category_name = %s;",
+                    (category_name,)
+                )
+                result = cursor.fetchone()
+                return result[0] if result else None
+        except psycopg2.Error as e:
+            logger.error(f"Failed to get category ID: {e}")
+            raise
+
+    def insert_or_get_merchant(self, name: str, city: str = None, country: str = None,
+                                address: str = None, logo_description: str = None) -> int:
+        """
+        Insert merchant or get existing one by name.
+
+        Args:
+            name: Merchant name
+            city: City (optional)
+            country: Country (optional)
+            address: Full address (optional)
+            logo_description: Logo description if name unclear (optional)
+
+        Returns:
+            merchant_id
+        """
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+
+        try:
+            with self.connection.cursor() as cursor:
+                # Try to find existing merchant by name
+                cursor.execute(
+                    "SELECT merchant_id FROM merchant WHERE name = %s;",
+                    (name,)
+                )
+                result = cursor.fetchone()
+
+                if result:
+                    merchant_id = result[0]
+                    logger.debug(f"Merchant '{name}' already exists with ID: {merchant_id}")
+                    return merchant_id
+
+                # Insert new merchant
+                cursor.execute(
+                    """
+                    INSERT INTO merchant (name, city, country, address, logo_description)
+                    VALUES (%s, %s, %s, %s, %s)
+                    RETURNING merchant_id;
+                    """,
+                    (name, city, country, address, logo_description)
+                )
+                merchant_id = cursor.fetchone()[0]
+                self.connection.commit()
+                logger.info(f"Merchant '{name}' inserted with ID: {merchant_id}")
+                return merchant_id
+        except psycopg2.Error as e:
+            self.connection.rollback()
+            logger.error(f"Failed to insert/get merchant: {e}")
+            raise
+
+    def insert_transaction(self, date: str = None, time: str = None, currency: str = 'EUR',
+                          net_amount: float = None, vat_amount: float = None,
+                          brutto_amount: float = None, payment_method: str = None,
+                          card_number: str = None) -> int:
+        """
+        Insert transaction record.
+
+        Args:
+            date: Transaction date (YYYY-MM-DD)
+            time: Transaction time (HH:MM:SS)
+            currency: Currency code (default: EUR)
+            net_amount: Net amount before tax
+            vat_amount: VAT/tax amount
+            brutto_amount: Total/gross amount
+            payment_method: Payment method (card, cash, paypal, etc.)
+            card_number: Last 4 digits of card
+
+        Returns:
+            transaction_id
+        """
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO transaction (date, time, currency, net_amount, vat_amount,
+                                            brutto_amount, payment_method, card_number)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING transaction_id;
+                    """,
+                    (date, time, currency, net_amount, vat_amount, brutto_amount,
+                     payment_method, card_number)
+                )
+                transaction_id = cursor.fetchone()[0]
+                self.connection.commit()
+                logger.info(f"Transaction inserted with ID: {transaction_id}")
+                return transaction_id
+        except psycopg2.Error as e:
+            self.connection.rollback()
+            logger.error(f"Failed to insert transaction: {e}")
+            raise
+
+    def insert_ai_analysis(self, model_name: str, extraction_status: str,
+                          input_tokens: int, output_tokens: int,
+                          raw_data: dict = None, error_message: str = None) -> int:
+        """
+        Insert AI analysis record.
+
+        Args:
+            model_name: Name of the AI model used
+            extraction_status: Status (complete, partial, needs_review, failed, refused)
+            input_tokens: Number of input tokens
+            output_tokens: Number of output tokens
+            raw_data: Full JSON response from Claude (optional)
+            error_message: Error message if analysis failed (optional)
+
+        Returns:
+            analysis_id
+        """
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+
+        try:
+            import json
+            with self.connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO ai_analysis (model_name, extraction_status, input_tokens,
+                                           output_tokens, raw_data, error_message)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    RETURNING analysis_id;
+                    """,
+                    (model_name, extraction_status, input_tokens, output_tokens,
+                     json.dumps(raw_data) if raw_data else None, error_message)
+                )
+                analysis_id = cursor.fetchone()[0]
+                self.connection.commit()
+                logger.info(f"AI analysis inserted with ID: {analysis_id}, model: {model_name}, "
+                          f"tokens: {input_tokens} in / {output_tokens} out")
+                return analysis_id
+        except psycopg2.Error as e:
+            self.connection.rollback()
+            logger.error(f"Failed to insert AI analysis: {e}")
+            raise
+
+    def update_receipt_with_analysis(self, receipt_id: int, merchant_id: int,
+                                     transaction_id: int, ai_analysis_id: int) -> None:
+        """
+        Update receipt with analysis results from Claude.
+
+        Args:
+            receipt_id: Receipt ID
+            merchant_id: Merchant ID
+            transaction_id: Transaction ID
+            ai_analysis_id: AI Analysis ID
+        """
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE receipt
+                    SET merchant_id = %s,
+                        transaction_id = %s,
+                        ai_analysis_id = %s,
+                        processing_status = 'completed',
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE receipt_id = %s;
+                    """,
+                    (merchant_id, transaction_id, ai_analysis_id, receipt_id)
+                )
+                self.connection.commit()
+                logger.info(f"Receipt {receipt_id} updated with analysis results")
+        except psycopg2.Error as e:
+            self.connection.rollback()
+            logger.error(f"Failed to update receipt with analysis: {e}")
+            raise
+
+    def insert_receipt_items(self, receipt_id: int, items: list) -> None:
+        """
+        Insert receipt items in batch.
+
+        Args:
+            receipt_id: Receipt ID
+            items: List of item dictionaries with keys:
+                   name, quantity, unit_price, total_price, category, article_number
+        """
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+
+        try:
+            with self.connection.cursor() as cursor:
+                for item in items:
+                    # Get category_id from category name
+                    category_id = None
+                    if item.get('category'):
+                        category_id = self.get_category_id_by_name(item['category'])
+
+                    cursor.execute(
+                        """
+                        INSERT INTO receipt_item (receipt_id, category_id, item_name,
+                                                 article_number, quantity, unit_price, total_price)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s);
+                        """,
+                        (receipt_id, category_id, item.get('name'),
+                         item.get('article_number'), item.get('quantity'),
+                         item.get('unit_price'), item.get('total_price'))
+                    )
+
+                self.connection.commit()
+                logger.info(f"Inserted {len(items)} items for receipt {receipt_id}")
+        except psycopg2.Error as e:
+            self.connection.rollback()
+            logger.error(f"Failed to insert receipt items: {e}")
+            raise
