@@ -352,19 +352,50 @@ class Database:
 
         try:
             with self.connection.cursor() as cursor:
-                # Try to find existing merchant by name
+                # Enable pg_trgm extension if not already enabled (safe - does nothing if exists)
+                try:
+                    cursor.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm;")
+                    self.connection.commit()
+                except psycopg2.Error:
+                    # Extension might already exist or user lacks permissions
+                    # Continue without failing
+                    pass
+
+                # Strategy 1: Case-insensitive name match with fuzzy address similarity
+                if address:
+                    cursor.execute(
+                        """
+                        SELECT merchant_id, address, similarity(address, %s) as sim
+                        FROM merchant
+                        WHERE LOWER(name) = LOWER(%s)
+                          AND address IS NOT NULL
+                          AND similarity(address, %s) >= 0.3
+                        ORDER BY sim DESC
+                        LIMIT 1;
+                        """,
+                        (address, name, address)
+                    )
+                    result = cursor.fetchone()
+
+                    if result:
+                        merchant_id = result[0]
+                        logger.debug(f"Merchant '{name}' found by name+address fuzzy match "
+                                   f"(ID: {merchant_id}, similarity: {result[2]:.2f})")
+                        return merchant_id
+
+                # Strategy 2: Case-insensitive name match only (fallback)
                 cursor.execute(
-                    "SELECT merchant_id FROM merchant WHERE name = %s;",
+                    "SELECT merchant_id FROM merchant WHERE LOWER(name) = LOWER(%s) LIMIT 1;",
                     (name,)
                 )
                 result = cursor.fetchone()
 
                 if result:
                     merchant_id = result[0]
-                    logger.debug(f"Merchant '{name}' already exists with ID: {merchant_id}")
+                    logger.debug(f"Merchant '{name}' found by name-only match (ID: {merchant_id})")
                     return merchant_id
 
-                # Insert new merchant
+                # No match found - insert new merchant
                 cursor.execute(
                     """
                     INSERT INTO merchant (name, city, country, address, logo_description)
@@ -375,7 +406,7 @@ class Database:
                 )
                 merchant_id = cursor.fetchone()[0]
                 self.connection.commit()
-                logger.info(f"Merchant '{name}' inserted with ID: {merchant_id}")
+                logger.info(f"New merchant '{name}' inserted with ID: {merchant_id}")
                 return merchant_id
         except psycopg2.Error as e:
             self.connection.rollback()
@@ -540,4 +571,224 @@ class Database:
         except psycopg2.Error as e:
             self.connection.rollback()
             logger.error(f"Failed to insert receipt items: {e}")
+            raise
+
+    def get_receipt_items_sum(self, receipt_id: int) -> float:
+        """
+        Calculate the sum of all item total prices for a receipt.
+
+        Args:
+            receipt_id: Receipt ID
+
+        Returns:
+            Sum of all item total_price values, or 0.0 if no items
+        """
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT COALESCE(SUM(total_price), 0.0)
+                    FROM receipt_item
+                    WHERE receipt_id = %s;
+                    """,
+                    (receipt_id,)
+                )
+                result = cursor.fetchone()[0]
+                logger.debug(f"Receipt {receipt_id} items sum: {result}")
+                return float(result) if result else 0.0
+        except psycopg2.Error as e:
+            logger.error(f"Failed to calculate receipt items sum: {e}")
+            raise
+
+    def get_receipt_items_by_category(self, receipt_id: int) -> list:
+        """
+        Get receipt items grouped by category with totals.
+
+        Args:
+            receipt_id: Receipt ID
+
+        Returns:
+            List of tuples: (category_name, item_count, total_amount)
+            Ordered by total_amount descending
+        """
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT
+                        COALESCE(c.category_name, 'Uncategorized') as category_name,
+                        COUNT(ri.item_id) as item_count,
+                        COALESCE(SUM(ri.total_price), 0.0) as total_amount
+                    FROM receipt_item ri
+                    LEFT JOIN category c ON ri.category_id = c.category_id
+                    WHERE ri.receipt_id = %s
+                    GROUP BY c.category_name
+                    ORDER BY total_amount DESC;
+                    """,
+                    (receipt_id,)
+                )
+                results = cursor.fetchall()
+                logger.debug(f"Receipt {receipt_id} has {len(results)} categories")
+                return [(row[0], int(row[1]), float(row[2])) for row in results]
+        except psycopg2.Error as e:
+            logger.error(f"Failed to get receipt items by category: {e}")
+            raise
+
+    def mark_receipt_as_deleted(self, receipt_id: int, user_id: int = None) -> bool:
+        """
+        Mark receipt as deleted (soft delete).
+
+        Args:
+            receipt_id: Receipt ID
+            user_id: Optional user ID for ownership verification
+
+        Returns:
+            True if receipt was marked as deleted, False if not found or not authorized
+        """
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+
+        try:
+            with self.connection.cursor() as cursor:
+                # Build query with optional user_id check
+                if user_id is not None:
+                    cursor.execute(
+                        """
+                        UPDATE receipt
+                        SET is_deleted = TRUE,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE receipt_id = %s AND user_id = %s
+                        RETURNING receipt_id;
+                        """,
+                        (receipt_id, user_id)
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        UPDATE receipt
+                        SET is_deleted = TRUE,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE receipt_id = %s
+                        RETURNING receipt_id;
+                        """,
+                        (receipt_id,)
+                    )
+
+                result = cursor.fetchone()
+                self.connection.commit()
+
+                if result:
+                    logger.info(f"Receipt {receipt_id} marked as deleted by user {user_id if user_id else 'N/A'}")
+                    return True
+                else:
+                    if user_id is not None:
+                        logger.warning(f"Receipt {receipt_id} not found or not owned by user {user_id}")
+                    else:
+                        logger.warning(f"Receipt {receipt_id} not found")
+                    return False
+        except psycopg2.Error as e:
+            self.connection.rollback()
+            logger.error(f"Failed to mark receipt as deleted: {e}")
+            raise
+
+    def verify_receipt_owner(self, receipt_id: int, user_id: int) -> bool:
+        """
+        Verify that a receipt belongs to a specific user.
+
+        Args:
+            receipt_id: Receipt ID
+            user_id: Telegram user ID
+
+        Returns:
+            True if receipt belongs to user, False otherwise
+        """
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT user_id
+                    FROM receipt
+                    WHERE receipt_id = %s;
+                    """,
+                    (receipt_id,)
+                )
+                result = cursor.fetchone()
+
+                if result:
+                    receipt_owner_id = result[0]
+                    is_owner = (receipt_owner_id == user_id)
+                    if not is_owner:
+                        logger.warning(f"User {user_id} attempted to access receipt {receipt_id} owned by {receipt_owner_id}")
+                    return is_owner
+                else:
+                    logger.warning(f"Receipt {receipt_id} not found during ownership check")
+                    return False
+        except psycopg2.Error as e:
+            logger.error(f"Failed to verify receipt ownership: {e}")
+            raise
+
+    def get_receipt_processed_image_path(self, receipt_id: int, user_id: int = None) -> str | None:
+        """
+        Get the processed image path for a receipt.
+
+        Args:
+            receipt_id: Receipt ID
+            user_id: Optional user ID for ownership verification
+
+        Returns:
+            Path to processed image file, or None if not found or not authorized
+        """
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+
+        try:
+            with self.connection.cursor() as cursor:
+                # Build query with optional user_id check
+                if user_id is not None:
+                    cursor.execute(
+                        """
+                        SELECT i.processed_file_path, i.orig_file_path
+                        FROM receipt r
+                        JOIN image i ON r.image_id = i.image_id
+                        WHERE r.receipt_id = %s AND r.user_id = %s;
+                        """,
+                        (receipt_id, user_id)
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        SELECT i.processed_file_path, i.orig_file_path
+                        FROM receipt r
+                        JOIN image i ON r.image_id = i.image_id
+                        WHERE r.receipt_id = %s;
+                        """,
+                        (receipt_id,)
+                    )
+
+                result = cursor.fetchone()
+
+                if result:
+                    # Return processed path if available, otherwise original
+                    processed_path = result[0]
+                    original_path = result[1]
+                    path = processed_path if processed_path else original_path
+                    logger.debug(f"Receipt {receipt_id} image path: {path}")
+                    return path
+                else:
+                    if user_id is not None:
+                        logger.warning(f"Receipt {receipt_id} not found or not owned by user {user_id}")
+                    else:
+                        logger.warning(f"Receipt {receipt_id} not found")
+                    return None
+        except psycopg2.Error as e:
+            logger.error(f"Failed to get receipt image path: {e}")
             raise

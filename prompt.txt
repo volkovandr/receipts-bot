@@ -34,9 +34,11 @@ Be thorough and systematic - include everything visible, even if it seems redund
 ANALYSIS INSTRUCTIONS:
 
 1. STORE INFORMATION:
-   - Identify the exact store/brand name
-   - Determine the city and country of the location
-   - Extract the full address if visible
+   - Identify the exact store/brand name (company name, not the specific branch)
+   - **CRITICAL**: Extract the LOCAL BRANCH address - the actual store location where the purchase was made
+   - **DO NOT** use headquarters address or corporate office location
+   - Look for address details typically printed at the top or bottom of the receipt
+   - Extract the full address including: street name, street number, postal code, city, country
    - If the store name is unclear from text, describe any visible logo features
 
 2. TRANSACTION DETAILS:

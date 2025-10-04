@@ -9,8 +9,8 @@ import os
 from functools import wraps
 from pathlib import Path
 from datetime import datetime
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from config import Config
 from database import Database
 from image_processor import ImageProcessor
@@ -92,6 +92,115 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await _process_image(update, context, is_document=True)
     else:
         await update.message.reply_text('Please send image files only.')
+
+
+async def handle_view_image_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle callback when user clicks view processed image button."""
+    query = update.callback_query
+    await query.answer()
+
+    # Extract receipt_id from callback_data
+    callback_data = query.data
+    if not callback_data.startswith("view_image_"):
+        logger.warning(f"Invalid callback data: {callback_data}")
+        return
+
+    try:
+        receipt_id = int(callback_data.replace("view_image_", ""))
+    except ValueError:
+        logger.error(f"Failed to parse receipt_id from callback_data: {callback_data}")
+        await query.answer("❌ Error: Invalid receipt ID", show_alert=True)
+        return
+
+    # Get database from context
+    db = context.bot_data.get('database')
+    if not db:
+        logger.error("Database connection not available")
+        await query.answer("❌ Error: Database not available", show_alert=True)
+        return
+
+    # Get user ID for authorization check
+    user_id = query.from_user.id
+
+    # Get processed image path with user verification
+    try:
+        image_path = db.get_receipt_processed_image_path(receipt_id, user_id)
+
+        if image_path and Path(image_path).exists():
+            # Send the processed image to the user
+            with open(image_path, 'rb') as photo_file:
+                await context.bot.send_photo(
+                    chat_id=query.message.chat_id,
+                    photo=photo_file,
+                    caption=f"🔍 Processed image for receipt ID: {receipt_id}\n"
+                            f"This is the image that was sent to Claude AI for analysis."
+                )
+            logger.info(f"Sent processed image for receipt {receipt_id} to user {user_id}")
+        elif image_path:
+            await query.answer(f"❌ Image file not found", show_alert=True)
+            logger.warning(f"Image file not found for receipt {receipt_id}: {image_path}")
+        else:
+            await query.answer("❌ Receipt not found or access denied", show_alert=True)
+            logger.warning(f"Receipt {receipt_id} not found or user {user_id} not authorized")
+
+    except Exception as e:
+        logger.error(f"Error sending image for receipt {receipt_id}: {e}")
+        await query.answer("❌ Error retrieving image. Please try again later.", show_alert=True)
+
+
+async def handle_delete_receipt_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle callback when user clicks delete receipt button."""
+    query = update.callback_query
+    await query.answer()
+
+    # Extract receipt_id from callback_data
+    callback_data = query.data
+    if not callback_data.startswith("delete_receipt_"):
+        logger.warning(f"Invalid callback data: {callback_data}")
+        return
+
+    try:
+        receipt_id = int(callback_data.replace("delete_receipt_", ""))
+    except ValueError:
+        logger.error(f"Failed to parse receipt_id from callback_data: {callback_data}")
+        await query.edit_message_text("❌ Error: Invalid receipt ID")
+        return
+
+    # Get database from context
+    db = context.bot_data.get('database')
+    if not db:
+        logger.error("Database connection not available")
+        await query.edit_message_text("❌ Error: Database not available")
+        return
+
+    # Get user ID for authorization check
+    user_id = query.from_user.id
+
+    # Mark receipt as deleted with user verification
+    try:
+        success = db.mark_receipt_as_deleted(receipt_id, user_id)
+
+        if success:
+            # Update message to show deletion confirmation
+            await query.edit_message_text(
+                f"🗑️ Receipt deleted successfully!\n\n"
+                f"Receipt ID: {receipt_id}\n"
+                f"The receipt data has been marked as deleted and will not be included in reports."
+            )
+            logger.info(f"Receipt {receipt_id} deleted by user {user_id}")
+        else:
+            await query.edit_message_text(
+                f"❌ Receipt not found or access denied!\n\n"
+                f"Receipt ID: {receipt_id}\n"
+                f"You can only delete your own receipts."
+            )
+            logger.warning(f"User {user_id} attempted to delete receipt {receipt_id} - not found or not authorized")
+    except Exception as e:
+        logger.error(f"Error deleting receipt {receipt_id}: {e}")
+        await query.edit_message_text(
+            f"❌ Error deleting receipt!\n\n"
+            f"An error occurred while trying to delete the receipt. Please try again later."
+        )
 
 
 async def _process_image(update: Update, context: ContextTypes.DEFAULT_TYPE, is_document: bool) -> None:
@@ -300,16 +409,53 @@ async def _analyze_receipt_with_claude(context, db, receipt_id, image_id, image_
         if items:
             db.insert_receipt_items(receipt_id, items)
 
-        logger.info(f"Receipt {receipt_id} analyzed successfully: {len(items)} items, status: {extraction_status}")
+        # Check total consistency
+        is_consistent = True
+        items_sum = 0.0
+        receipt_total = transaction_data.get('brutto_amount')
+
+        if items and receipt_total is not None:
+            items_sum = db.get_receipt_items_sum(receipt_id)
+
+            # Compare with tolerance for floating point errors (0.01 currency units)
+            if abs(float(receipt_total) - items_sum) > 0.01:
+                is_consistent = False
+                logger.warning(f"Receipt {receipt_id} total inconsistency: "
+                             f"receipt total={receipt_total}, items sum={items_sum}")
+                db.update_receipt_status(receipt_id, 'completed/inconsistent')
+
+        logger.info(f"Receipt {receipt_id} analyzed successfully: {len(items)} items, "
+                   f"status: {extraction_status}, consistent: {is_consistent}")
+
+        # Get category breakdown
+        category_breakdown = db.get_receipt_items_by_category(receipt_id)
+        currency = transaction_data.get("currency", "EUR")
 
         # Prepare success message
         success_text = (
             '✅ Analysis complete!\n\n'
             f'🏪 Merchant: {merchant_data.get("name", "Unknown")}\n'
             f'📅 Date: {transaction_data.get("date", "N/A")}\n'
-            f'💰 Total: {transaction_data.get("brutto_amount", "N/A")} {transaction_data.get("currency", "EUR")}\n'
             f'📝 Items: {len(items)}\n'
         )
+
+        # Add category breakdown
+        if category_breakdown:
+            success_text += '\n💶 Breakdown by category:\n'
+            for category_name, item_count, total_amount in category_breakdown:
+                success_text += f'  • {category_name}: {total_amount:.2f} {currency} ({item_count} item{"s" if item_count > 1 else ""})\n'
+
+        # Add grand total
+        success_text += f'\n💰 Grand Total: {transaction_data.get("brutto_amount", "N/A")} {currency}\n'
+
+        # Add consistency warning
+        if not is_consistent and receipt_total is not None:
+            success_text += (
+                f'\n⚠️ Total mismatch detected!\n'
+                f'   Receipt total: {receipt_total:.2f}\n'
+                f'   Items sum: {items_sum:.2f}\n'
+                f'   Difference: {abs(float(receipt_total) - items_sum):.2f}\n'
+            )
 
         # Add warnings if there are uncertain fields or clarifications needed
         if uncertain_fields:
@@ -320,7 +466,14 @@ async def _analyze_receipt_with_claude(context, db, receipt_id, image_id, image_
             for item in need_clarification:
                 success_text += f'  • {item.get("name")}: {item.get("reason")}\n'
 
-        await status_message.edit_text(success_text)
+        # Add inline buttons: view processed image and delete
+        keyboard = [
+            [InlineKeyboardButton("🔍 View processed image", callback_data=f"view_image_{receipt_id}")],
+            [InlineKeyboardButton("🗑️ Delete this receipt", callback_data=f"delete_receipt_{receipt_id}")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
+        await status_message.edit_text(success_text, reply_markup=reply_markup)
 
     except ValueError as e:
         # Handle specific validation errors (like refusals) with custom messages
@@ -446,6 +599,10 @@ def main() -> None:
     # Register command handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("hello", hello))
+
+    # Register callback query handlers
+    application.add_handler(CallbackQueryHandler(handle_view_image_callback, pattern="^view_image_"))
+    application.add_handler(CallbackQueryHandler(handle_delete_receipt_callback, pattern="^delete_receipt_"))
 
     # Register message handlers
     application.add_handler(MessageHandler(filters.PHOTO, handle_photo))

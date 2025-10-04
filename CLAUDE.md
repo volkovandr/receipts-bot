@@ -107,6 +107,38 @@ This is a Telegram bot for processing receipt images and financial documents. Th
   - Handles markdown code blocks in responses
   - Robust error handling for API failures and refusals
   - Graceful handling of content policy refusals (QR codes, tax IDs, etc.)
+  - **Smart prompt**: Emphasizes extracting LOCAL branch address (not headquarters)
+- ✅ **Merchant Deduplication** (`database.py`)
+  - Case-insensitive name matching (`REWE` = `rewe` = `Rewe`)
+  - Fuzzy address matching using PostgreSQL `pg_trgm` extension
+  - Similarity threshold: 30% (prevents duplicates from minor address variations)
+  - SQL-based fuzzy matching for performance
+- ✅ **Receipt Total Consistency Check** (`bot.py`, `database.py`)
+  - Validates receipt total against sum of individual items
+  - Tolerance: 0.01 currency units for floating-point errors
+  - Status `completed/inconsistent` if totals don't match
+  - Shows detailed mismatch information to user
+- ✅ **Category Breakdown Display** (`bot.py`, `database.py`)
+  - Groups items by category with totals
+  - Shows item count per category
+  - Sorted by spending amount (highest first)
+  - Clear, formatted summary message
+- ✅ **Soft Delete Feature** (`bot.py`, `database.py`, `schema.sql`)
+  - Inline "🗑️ Delete this receipt" button in summary
+  - Sets `is_deleted = TRUE` (data preserved in database)
+  - User-friendly confirmation message
+  - Authorization: users can only delete their own receipts
+- ✅ **View Processed Image** (`bot.py`, `database.py`)
+  - Inline "🔍 View processed image" button in summary
+  - Sends the exact image analyzed by Claude AI
+  - Helps troubleshoot cropping issues
+  - Authorization: users can only view their own receipt images
+- ✅ **Security & Authorization** (`bot.py`, `database.py`)
+  - All receipt operations verify ownership (user_id check)
+  - SQL-level authorization: `WHERE receipt_id = %s AND user_id = %s`
+  - Application-level checks in callback handlers
+  - Audit logging for unauthorized access attempts
+  - Defense in depth: both database and application layers verify ownership
 
 ### Project Structure
 ```
@@ -191,10 +223,12 @@ The database uses schema `app_receipts_bot` with the following entities:
 
 7. **receipt** - Receipt records
    - References: image, user, merchant, transaction, ai_analysis
-   - Processing status tracking: created → pre-processed → processing → completed/failed
+   - Processing status tracking: created → pre-processed → processing → completed/failed/completed/inconsistent
    - Status 'created' is set when image is first received
    - Status 'pre-processed' is set when image is prepared for AI analysis
-   - Status 'completed' is set after successful AI analysis
+   - Status 'completed' is set after successful AI analysis with matching totals
+   - Status 'completed/inconsistent' is set when receipt total doesn't match items sum
+   - **Soft delete**: `is_deleted` boolean field (default: FALSE)
 
 8. **receipt_item** - Individual line items from receipts
    - References: receipt, category (optional)

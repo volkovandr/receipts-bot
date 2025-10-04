@@ -87,6 +87,7 @@ CREATE TABLE receipt (
     transaction_id INTEGER REFERENCES transaction(transaction_id) ON DELETE SET NULL,
     ai_analysis_id INTEGER REFERENCES ai_analysis(analysis_id) ON DELETE SET NULL,
     processing_status TEXT DEFAULT 'pending',  -- created, pre-processed, analyzing, completed, failed
+    is_deleted BOOLEAN DEFAULT FALSE,  -- soft delete flag
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
