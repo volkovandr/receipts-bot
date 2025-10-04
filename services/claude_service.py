@@ -33,7 +33,8 @@ class ClaudeService:
     def analyze_receipt(
         self,
         image_path: str,
-        categories: List[str]
+        categories: List[str],
+        category_notes: Optional[List[tuple[str, str]]] = None
     ) -> tuple[Dict[str, Any], int, int]:
         """
         Analyze receipt image using Claude vision API.
@@ -41,6 +42,7 @@ class ClaudeService:
         Args:
             image_path: Path to the receipt image file
             categories: List of category names from database
+            category_notes: Optional list of (category_name, ai_notes) tuples
 
         Returns:
             Tuple of (receipt_data, input_tokens, output_tokens)
@@ -54,7 +56,7 @@ class ClaudeService:
             json.JSONDecodeError: If response is not valid JSON
         """
         # Load and prepare prompt
-        prompt = self._prepare_prompt(self.prompt_template_path, categories)
+        prompt = self._prepare_prompt(self.prompt_template_path, categories, category_notes)
 
         # Load and encode image
         image_data = self._load_image(image_path)
@@ -150,16 +152,22 @@ class ClaudeService:
             logger.error(f"Unexpected error during receipt analysis: {e}")
             raise
 
-    def _prepare_prompt(self, template_path: str, categories: List[str]) -> str:
+    def _prepare_prompt(
+        self,
+        template_path: str,
+        categories: List[str],
+        category_notes: Optional[List[tuple[str, str]]] = None
+    ) -> str:
         """
-        Load prompt template and inject categories list.
+        Load prompt template and inject categories list and category notes.
 
         Args:
             template_path: Path to prompt template file
             categories: List of category names
+            category_notes: Optional list of (category_name, ai_notes) tuples
 
         Returns:
-            Complete prompt text with categories injected
+            Complete prompt text with categories and notes injected
         """
         template_file = Path(template_path)
         if not template_file.exists():
@@ -173,6 +181,19 @@ class ClaudeService:
 
         # Replace placeholder with actual categories
         prompt = template.replace(">> list of categories <<", categories_text)
+
+        # Format category notes
+        if category_notes and len(category_notes) > 0:
+            notes_text = "The following categories have special assignment rules. When you encounter items matching these descriptions, prioritize these notes over general categorization logic:\n\n"
+            for category_name, ai_note in category_notes:
+                notes_text += f"- {category_name}\n  Note: {ai_note}\n\n"
+            logger.debug(f"Added {len(category_notes)} category notes to prompt")
+        else:
+            notes_text = "No special category assignment rules defined."
+            logger.debug("No category notes to add to prompt")
+
+        # Replace placeholder with category notes
+        prompt = prompt.replace(">> category notes <<", notes_text)
 
         logger.debug(f"Prompt prepared with {len(categories)} categories")
         return prompt

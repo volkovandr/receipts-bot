@@ -64,3 +64,27 @@ class CategoryRepository:
         except psycopg2.Error as e:
             logger.error(f"Failed to get category ID: {e}")
             raise
+
+    def get_categories_with_notes(self) -> list[tuple[str, str]]:
+        """
+        Get categories that have AI notes defined.
+
+        Returns:
+            List of tuples (category_name, ai_notes) where ai_notes is not NULL
+        """
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT category_name, ai_notes FROM category "
+                    "WHERE ai_notes IS NOT NULL "
+                    "ORDER BY category_name;"
+                )
+                category_notes = cursor.fetchall()
+                logger.debug(f"Retrieved {len(category_notes)} categories with AI notes from database")
+                return category_notes
+        except psycopg2.Error as e:
+            logger.error(f"Failed to retrieve categories with notes: {e}")
+            raise

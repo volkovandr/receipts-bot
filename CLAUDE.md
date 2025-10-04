@@ -145,6 +145,13 @@ This is a Telegram bot for processing receipt images and financial documents. Th
   - Facade pattern in database.py for backward compatibility
   - Single Responsibility Principle - each module has one clear purpose
   - Maximum file size reduced from 794 to 394 lines
+- ✅ **AI Category Notes** (`schema.sql`, `repositories/category_repository.py`, `services/claude_service.py`)
+  - Added `ai_notes` field to category table for custom AI instructions
+  - Categories with notes are injected into Claude AI prompt
+  - Allows fine-tuning category assignments without code changes
+  - Example: "Use Child: Food for Haribo Bears instead of Food: Sweets"
+  - Notes fetched via `get_categories_with_notes()` and passed to Claude
+  - Prompt emphasizes prioritizing category-specific notes over general logic
 
 ### Project Structure
 ```
@@ -272,6 +279,8 @@ The database uses schema `app_receipts_bot` with the following entities:
 2. **category** - Item categories for expense tracking (71 predefined categories)
    - Used to classify receipt items (groceries, utilities, car expenses, etc.)
    - Assigned to individual items, not whole receipts
+   - **ai_notes** field: Optional custom instructions for Claude AI on category assignment
+   - Example: Guide Claude to use "Child: Food" for Haribo Bears instead of "Food: Sweets"
 
 3. **merchant** - Store/business information
    - Contains: name, city, country, address, logo_description
@@ -316,6 +325,8 @@ The bot uses Claude's vision capabilities to analyze receipt images. The prompt 
 - Requests structured JSON output
 - Extracts: merchant info, transaction details, all items with prices
 - Assigns categories from the predefined list (71 categories injected into prompt)
+- **Category-specific notes**: Categories with `ai_notes` are injected with special instructions
+- Prioritizes category notes over general categorization logic
 - Handles tax IDs, QR codes, payment information
 - Marks uncertain fields for user review
 - Supports multiple languages (keeps item names in original language)
@@ -335,14 +346,16 @@ The bot uses Claude's vision capabilities to analyze receipt images. The prompt 
 ### Processing Flow
 1. User uploads receipt image
 2. Image pre-processed (cropped, grayscale, resized)
-3. Claude analyzes with vision API (model configurable)
-4. Response parsed and validated (handles markdown code blocks)
-5. Data saved to database:
+3. Categories and category notes fetched from database
+4. Prompt prepared with categories list and category-specific notes injected
+5. Claude analyzes with vision API (model configurable)
+6. Response parsed and validated (handles markdown code blocks)
+7. Data saved to database:
    - AI analysis record (with tokens)
    - Merchant record (normalized)
    - Transaction record (financial details)
    - Receipt items (with category assignments)
-6. User receives summary with warnings for uncertain fields
+8. User receives summary with warnings for uncertain fields
 
 ## Next Steps
 

@@ -37,8 +37,14 @@ async def analyze_receipt_with_claude(context, db, receipt_id, image_id, image_p
         categories = db.get_all_categories()
         logger.info(f"Loaded {len(categories)} categories for analysis")
 
+        # Get category notes from database
+        category_notes = db.get_categories_with_notes()
+        logger.info(f"Loaded {len(category_notes)} category notes for analysis")
+
         # Analyze receipt with Claude
-        receipt_data, input_tokens, output_tokens = claude_service.analyze_receipt(image_path, categories)
+        receipt_data, input_tokens, output_tokens = claude_service.analyze_receipt(
+            image_path, categories, category_notes
+        )
 
         # Extract data from response
         extraction_status = receipt_data.get('extraction_status', 'unknown')

@@ -83,6 +83,10 @@ class Database:
         """Get category ID by name."""
         return self.category_repo.get_category_id_by_name(category_name)
 
+    def get_categories_with_notes(self) -> list[tuple[str, str]]:
+        """Get categories that have AI notes defined."""
+        return self.category_repo.get_categories_with_notes()
+
     # Merchant operations
     def insert_or_get_merchant(self, name: str, city: str = None, country: str = None,
                                 address: str = None, logo_description: str = None) -> int:

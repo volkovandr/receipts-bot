@@ -63,7 +63,8 @@ ANALYSIS INSTRUCTIONS:
    - Match items to categories based on item type and purpose
    - When confidence in category assignment is below 80%, consider them as needed clarification
    - Category might be deducted from the shop itself when unclear for an individual item
-   
+   - **IMPORTANT**: If category-specific notes are provided below, prioritize them over general categorization logic
+
 5. TOTALS CALCULATION:
    - Subtotal: sum before tax (Netto)
    - Tax: value-added tax (MwSt, VAT)
@@ -83,6 +84,9 @@ ANALYSIS INSTRUCTIONS:
 
 CATEGORIES DICTIONARY:
 >> list of categories <<
+
+CATEGORY-SPECIFIC NOTES:
+>> category notes <<
 
 OUTPUT FORMAT:
 """"
