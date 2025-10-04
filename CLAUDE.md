@@ -80,7 +80,7 @@ This is a Telegram bot for processing receipt images and financial documents. Th
   - Stores image metadata in database (file_id, path, size, mime_type)
   - Creates receipt record with status 'created' when image is received
   - Links receipt to image and user
-- ✅ **Image pre-processing** (`image_processor.py`)
+- ✅ **Image pre-processing** (`services/image_processor.py`)
   - **Grayscale conversion** - Converts to grayscale first for optimal processing
   - **Multi-strategy receipt detection and cropping**:
     - Strategy 1: Edge detection with contour filtering
@@ -95,11 +95,11 @@ This is a Telegram bot for processing receipt images and financial documents. Th
   - Updates receipt status to 'pre-processed' after successful processing
   - Robust error handling - falls back to original image if all strategies fail
   - **Performance**: 17-64% file size reduction depending on background type
-- ✅ **User management**
+- ✅ **User management** (`handlers/commands.py`)
   - `/start` command inserts/updates user in database
   - Uses Telegram username or falls back to first name/full name
   - Updates username if changed on subsequent `/start` commands
-- ✅ **Claude AI Integration** (`claude_service.py`)
+- ✅ **Claude AI Integration** (`services/claude_service.py`)
   - Vision API integration with configurable model selection
   - Automatic prompt template loading with category injection
   - Extracts structured data: merchant, transaction, items with categories
@@ -108,55 +108,127 @@ This is a Telegram bot for processing receipt images and financial documents. Th
   - Robust error handling for API failures and refusals
   - Graceful handling of content policy refusals (QR codes, tax IDs, etc.)
   - **Smart prompt**: Emphasizes extracting LOCAL branch address (not headquarters)
-- ✅ **Merchant Deduplication** (`database.py`)
+- ✅ **Merchant Deduplication** (`repositories/merchant_repository.py`)
   - Case-insensitive name matching (`REWE` = `rewe` = `Rewe`)
   - Fuzzy address matching using PostgreSQL `pg_trgm` extension
   - Similarity threshold: 30% (prevents duplicates from minor address variations)
   - SQL-based fuzzy matching for performance
-- ✅ **Receipt Total Consistency Check** (`bot.py`, `database.py`)
+- ✅ **Receipt Total Consistency Check** (`services/receipt_analyzer.py`, `repositories/receipt_repository.py`)
   - Validates receipt total against sum of individual items
   - Tolerance: 0.01 currency units for floating-point errors
   - Status `completed/inconsistent` if totals don't match
   - Shows detailed mismatch information to user
-- ✅ **Category Breakdown Display** (`bot.py`, `database.py`)
+- ✅ **Category Breakdown Display** (`services/receipt_analyzer.py`, `repositories/receipt_repository.py`)
   - Groups items by category with totals
   - Shows item count per category
   - Sorted by spending amount (highest first)
   - Clear, formatted summary message
-- ✅ **Soft Delete Feature** (`bot.py`, `database.py`, `schema.sql`)
+- ✅ **Soft Delete Feature** (`handlers/callbacks.py`, `repositories/receipt_repository.py`, `schema.sql`)
   - Inline "🗑️ Delete this receipt" button in summary
   - Sets `is_deleted = TRUE` (data preserved in database)
   - User-friendly confirmation message
   - Authorization: users can only delete their own receipts
-- ✅ **View Processed Image** (`bot.py`, `database.py`)
+- ✅ **View Processed Image** (`handlers/callbacks.py`, `repositories/receipt_repository.py`)
   - Inline "🔍 View processed image" button in summary
   - Sends the exact image analyzed by Claude AI
   - Helps troubleshoot cropping issues
   - Authorization: users can only view their own receipt images
-- ✅ **Security & Authorization** (`bot.py`, `database.py`)
+- ✅ **Security & Authorization** (`bot.py`, `handlers/callbacks.py`, `repositories/receipt_repository.py`)
   - All receipt operations verify ownership (user_id check)
   - SQL-level authorization: `WHERE receipt_id = %s AND user_id = %s`
   - Application-level checks in callback handlers
   - Audit logging for unauthorized access attempts
   - Defense in depth: both database and application layers verify ownership
+- ✅ **Code Architecture Refactoring**
+  - Clean separation into handlers/, services/, repositories/
+  - Repository pattern for all data access operations
+  - Facade pattern in database.py for backward compatibility
+  - Single Responsibility Principle - each module has one clear purpose
+  - Maximum file size reduced from 794 to 394 lines
 
 ### Project Structure
 ```
 receipts-bot-2/
-├── bot.py              # Main bot application
-├── config.py           # Configuration module
-├── database.py         # Database operations module
-├── image_processor.py  # Image processing module
-├── claude_service.py   # Claude AI integration module
-├── schema.sql          # Database schema
-├── prompt.txt          # Claude AI prompt template
-├── config.ini          # Configuration file (gitignored)
-├── requirements.txt    # Python dependencies
-├── images/             # Image storage (gitignored)
-│   ├── orig/          # Original uploaded images
-│   └── processed/     # Pre-processed images (cropped, grayscale, resized)
-└── venv/              # Virtual environment
+├── bot.py                  # Main application entry point & handler registration
+├── config.py               # Configuration management (50 lines)
+├── database.py             # Unified database interface - facade pattern (150 lines)
+├── schema.sql              # Database schema
+├── prompt.txt              # Claude AI prompt template
+├── config.ini              # Configuration file (gitignored)
+├── requirements.txt        # Python dependencies
+│
+├── handlers/               # Telegram bot handlers (Telegram interaction layer)
+│   ├── commands.py        # Command handlers (/start, /hello)
+│   ├── images.py          # Image upload handlers (photo & document)
+│   └── callbacks.py       # Inline button callback handlers
+│
+├── services/               # Business logic layer
+│   ├── claude_service.py  # Claude AI integration
+│   ├── image_processor.py # Image pre-processing
+│   └── receipt_analyzer.py # Receipt analysis orchestration
+│
+├── repositories/           # Data access layer (Repository pattern)
+│   ├── database_connection.py    # Connection & schema management
+│   ├── user_repository.py        # User data operations
+│   ├── image_repository.py       # Image data operations
+│   ├── category_repository.py    # Category data operations
+│   ├── merchant_repository.py    # Merchant data operations
+│   ├── transaction_repository.py # Transaction data operations
+│   ├── ai_analysis_repository.py # AI analysis data operations
+│   └── receipt_repository.py     # Receipt & items data operations
+│
+├── images/                 # Image storage (gitignored)
+│   ├── orig/              # Original uploaded images
+│   └── processed/         # Pre-processed images (cropped, grayscale, resized)
+│
+└── venv/                  # Virtual environment
 ```
+
+### Architecture Layers
+
+The codebase follows a clean **three-tier architecture**:
+
+```
+┌─────────────────────────────────────────────┐
+│  bot.py (Entry Point)                       │
+│  - Application initialization               │
+│  - Handler registration                     │
+│  - Authorization decorator                  │
+└─────────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────┐
+│  handlers/ (Presentation Layer)             │
+│  - Telegram message/command handlers        │
+│  - User interaction & feedback              │
+│  - Input validation                         │
+└─────────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────┐
+│  services/ (Business Logic Layer)           │
+│  - Receipt analysis orchestration           │
+│  - Image processing                         │
+│  - Claude AI integration                    │
+└─────────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────┐
+│  database.py (Facade)                       │
+│  - Unified interface to repositories        │
+│  - Maintains backward compatibility         │
+└─────────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────┐
+│  repositories/ (Data Access Layer)          │
+│  - Specialized data operations              │
+│  - SQL queries & database logic             │
+│  - Connection management                    │
+└─────────────────────────────────────────────┘
+```
+
+**Key Design Patterns:**
+- **Repository Pattern**: Separates data access logic from business logic
+- **Facade Pattern**: `database.py` provides a simple interface to complex repository layer
+- **Dependency Injection**: Repositories receive database connection in constructor
+- **Single Responsibility**: Each module has one clear purpose
 
 ## Development Environment
 
