@@ -75,10 +75,12 @@ def main() -> None:
         claude_service = ClaudeService(
             api_key=config.anthropic_api_key,
             model=config.anthropic_model,
-            prompt_template_path=config.anthropic_prompt_template
+            prompt_template_path=config.anthropic_prompt_template,
+            enable_prompt_caching=config.anthropic_enable_prompt_caching
         )
         logger.info(f"Claude AI service initialized - Model: {config.anthropic_model}, "
-                   f"Prompt: {config.anthropic_prompt_template}")
+                   f"Prompt: {config.anthropic_prompt_template}, "
+                   f"Caching: {config.anthropic_enable_prompt_caching}")
     else:
         logger.warning("Anthropic API key not configured - AI analysis will not be available")
 

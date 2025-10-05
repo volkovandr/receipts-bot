@@ -119,8 +119,11 @@ class ItemEditorModal(ModalScreen):
             # Validate amount
             try:
                 new_amount = float(new_amount_str.replace(',', '.'))
-                if new_amount < 0.01 or new_amount > 99999.99:
-                    self.notify("Amount must be between 0.01 and 99999.99!", severity="error")
+                if new_amount == 0:
+                    self.notify("Amount cannot be zero!", severity="error")
+                    return
+                if new_amount < -99999.99 or new_amount > 99999.99:
+                    self.notify("Amount must be between -99999.99 and 99999.99 (excluding 0)!", severity="error")
                     return
             except ValueError:
                 self.notify("Invalid amount format! Please enter a number.", severity="error")

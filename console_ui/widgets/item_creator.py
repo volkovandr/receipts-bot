@@ -155,8 +155,11 @@ class ItemCreatorModal(ModalScreen):
             # Validate quantity
             try:
                 quantity = float(quantity_str.replace(',', '.'))
-                if quantity <= 0 or quantity > 99999.99:
-                    self.notify("Quantity must be between 0.01 and 99999.99!", severity="error")
+                if quantity == 0:
+                    self.notify("Quantity cannot be zero!", severity="error")
+                    return
+                if quantity < -99999.99 or quantity > 99999.99:
+                    self.notify("Quantity must be between -99999.99 and 99999.99 (excluding 0)!", severity="error")
                     return
             except ValueError:
                 self.notify("Invalid quantity format! Please enter a number.", severity="error")
@@ -165,8 +168,8 @@ class ItemCreatorModal(ModalScreen):
             # Validate unit price
             try:
                 unit_price = float(unit_price_str.replace(',', '.'))
-                if unit_price < 0 or unit_price > 99999.99:
-                    self.notify("Unit price must be between 0 and 99999.99!", severity="error")
+                if abs(unit_price) > 99999.99:
+                    self.notify("Unit price must be between -99999.99 and 99999.99!", severity="error")
                     return
             except ValueError:
                 self.notify("Invalid unit price format! Please enter a number.", severity="error")
@@ -174,8 +177,11 @@ class ItemCreatorModal(ModalScreen):
 
             # Calculate total
             total_price = quantity * unit_price
-            if total_price < 0.01 or total_price > 99999.99:
-                self.notify("Total price must be between 0.01 and 99999.99!", severity="error")
+            if total_price == 0:
+                self.notify("Total price cannot be zero!", severity="error")
+                return
+            if abs(total_price) > 99999.99:
+                self.notify("Total price must be between -99999.99 and 99999.99 (excluding 0)!", severity="error")
                 return
 
             # Create item in database
