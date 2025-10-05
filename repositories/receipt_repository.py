@@ -634,6 +634,40 @@ class ReceiptRepository:
             logger.error(f"Failed to update item category: {e}")
             raise
 
+    def get_recent_receipts(self, user_id: int, limit: int = 3) -> list[int]:
+        """
+        Get recent receipt IDs for a user (non-deleted, sorted by creation date).
+
+        Args:
+            user_id: Telegram user ID
+            limit: Number of receipts to retrieve (default: 3)
+
+        Returns:
+            List of receipt IDs, most recent first
+        """
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT receipt_id
+                    FROM receipt
+                    WHERE user_id = %s AND is_deleted = FALSE
+                    ORDER BY created_at DESC
+                    LIMIT %s;
+                    """,
+                    (user_id, limit)
+                )
+                results = cursor.fetchall()
+                receipt_ids = [row[0] for row in results]
+                logger.debug(f"Retrieved {len(receipt_ids)} recent receipts for user {user_id}")
+                return receipt_ids
+        except psycopg2.Error as e:
+            logger.error(f"Failed to get recent receipts: {e}")
+            raise
+
     def get_receipt_summary_data(self, receipt_id: int, user_id: int = None) -> dict | None:
         """
         Get receipt summary data for formatting.

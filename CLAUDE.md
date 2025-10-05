@@ -165,8 +165,13 @@ This is a Telegram bot for processing receipt images and financial documents. Th
   - **Smart navigation**: Edit operations return to item view; only "Back to summary" exits to summary
   - **Conversation state**: Uses `context.user_data` for multi-step editing flows
   - **Authorization**: All operations verify user ownership at SQL and application level
-  - **Recovery command**: `/receipts` command to retrieve lost receipts
   - Database migration: `migrations/001_add_receipt_item_is_deleted.sql`
+- ✅ **Receipt Listing Command** (`handlers/commands.py`, `repositories/receipt_repository.py`)
+  - `/receipts` command shows recent receipts (default: 3 receipts)
+  - Optional argument: `/receipts N` to show N receipts (max 10)
+  - Sorted by creation date (most recent first)
+  - Only shows non-deleted receipts owned by the user
+  - User-friendly error messages for invalid input
 
 ### Project Structure
 ```
@@ -180,7 +185,7 @@ receipts-bot-2/
 ├── requirements.txt        # Python dependencies
 │
 ├── handlers/               # Telegram bot handlers (Telegram interaction layer)
-│   ├── commands.py        # Command handlers (/start, /hello)
+│   ├── commands.py        # Command handlers (/start, /hello, /receipts)
 │   ├── images.py          # Image upload handlers (photo & document)
 │   ├── callbacks.py       # Inline button callback handlers (view, edit, delete)
 │   └── messages.py        # Text message handlers (editing workflows)

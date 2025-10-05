@@ -40,7 +40,13 @@ async def hello(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def receipts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """List recent receipts for the user."""
+    """
+    List recent receipts for the user.
+
+    Usage:
+        /receipts - Show last 3 receipts (default)
+        /receipts N - Show last N receipts (max 10)
+    """
     user_id = update.effective_user.id
     db = context.bot_data.get('database')
 
@@ -48,23 +54,40 @@ async def receipts(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text('❌ Error: Database not available')
         return
 
+    # Parse argument for number of receipts
+    limit = 3  # default
+    if context.args:
+        try:
+            limit = int(context.args[0])
+            if limit < 1:
+                await update.message.reply_text('❌ Please provide a positive number.')
+                return
+            if limit > 10:
+                limit = 10  # cap at 10
+        except ValueError:
+            await update.message.reply_text('❌ Please provide a valid number.\n\nUsage: /receipts [N]')
+            return
+
     try:
-        # Get recent receipts (limit 10)
-        # We need to add this method to the repository
         from services.receipt_formatter import format_receipt_summary
 
-        # For now, let's get receipt 30 which the user lost
-        receipt_id = 30
+        # Get recent receipt IDs
+        receipt_ids = db.get_recent_receipts(user_id, limit)
 
-        try:
-            summary_text, reply_markup = format_receipt_summary(db, receipt_id, user_id)
-            await update.message.reply_text(summary_text, reply_markup=reply_markup)
-            logger.info(f"Showed receipt {receipt_id} summary to user {user_id}")
-        except ValueError:
-            await update.message.reply_text(
-                f'Receipt #{receipt_id} not found or you don\'t have access to it.\n\n'
-                f'Use /receipts <receipt_id> to view a specific receipt.'
-            )
+        if not receipt_ids:
+            await update.message.reply_text('You don\'t have any receipts yet. Upload a receipt image to get started!')
+            return
+
+        # Send summary for each receipt
+        for receipt_id in receipt_ids:
+            try:
+                summary_text, reply_markup = format_receipt_summary(db, receipt_id, user_id)
+                await update.message.reply_text(summary_text, reply_markup=reply_markup)
+            except ValueError:
+                logger.warning(f"Receipt {receipt_id} not accessible for user {user_id}")
+                continue
+
+        logger.info(f"Showed {len(receipt_ids)} receipts to user {user_id}")
 
     except Exception as e:
         logger.error(f"Error in receipts command: {e}")

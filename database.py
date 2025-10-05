@@ -176,6 +176,10 @@ class Database:
         """Update receipt item category."""
         return self.receipt_repo.update_item_category(item_id, receipt_id, category_id, user_id)
 
+    def get_recent_receipts(self, user_id: int, limit: int = 3) -> list[int]:
+        """Get recent receipt IDs for a user."""
+        return self.receipt_repo.get_recent_receipts(user_id, limit)
+
     def get_receipt_summary_data(self, receipt_id: int, user_id: int = None) -> dict | None:
         """Get receipt summary data for formatting."""
         return self.receipt_repo.get_receipt_summary_data(receipt_id, user_id)
