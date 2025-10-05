@@ -79,6 +79,10 @@ class Database:
         """Get all category names."""
         return self.category_repo.get_all_categories()
 
+    def get_all_categories_with_ids(self) -> list[tuple[int, str]]:
+        """Get all categories with their IDs."""
+        return self.category_repo.get_all_categories_with_ids()
+
     def get_category_id_by_name(self, category_name: str) -> int | None:
         """Get category ID by name."""
         return self.category_repo.get_category_id_by_name(category_name)
@@ -100,6 +104,19 @@ class Database:
                                 address: str = None, logo_description: str = None) -> int:
         """Insert merchant or get existing one."""
         return self.merchant_repo.insert_or_get_merchant(name, city, country, address, logo_description)
+
+    def get_merchant_by_id(self, merchant_id: int) -> dict | None:
+        """Get merchant details by ID."""
+        return self.merchant_repo.get_merchant_by_id(merchant_id)
+
+    def update_merchant(self, merchant_id: int, name: str = None, city: str = None,
+                       country: str = None, address: str = None, logo_description: str = None) -> bool:
+        """Update merchant information."""
+        return self.merchant_repo.update_merchant(merchant_id, name, city, country, address, logo_description)
+
+    def get_receipt_count_by_merchant(self, merchant_id: int) -> int:
+        """Get count of receipts for a merchant."""
+        return self.merchant_repo.get_receipt_count_by_merchant(merchant_id)
 
     # Transaction operations
     def insert_transaction(self, date: str = None, time: str = None, currency: str = 'EUR',
@@ -152,6 +169,10 @@ class Database:
         """Mark receipt as deleted (soft delete)."""
         return self.receipt_repo.mark_receipt_as_deleted(receipt_id, user_id)
 
+    def undelete_receipt(self, receipt_id: int, user_id: int = None) -> bool:
+        """Restore a soft-deleted receipt."""
+        return self.receipt_repo.undelete_receipt(receipt_id, user_id)
+
     def verify_receipt_owner(self, receipt_id: int, user_id: int) -> bool:
         """Verify that a receipt belongs to a user."""
         return self.receipt_repo.verify_receipt_owner(receipt_id, user_id)
@@ -168,18 +189,40 @@ class Database:
         """Mark receipt item as deleted (soft delete)."""
         return self.receipt_repo.mark_item_as_deleted(item_id, receipt_id, user_id)
 
+    def undelete_item(self, item_id: int, receipt_id: int, user_id: int = None) -> bool:
+        """Restore a deleted receipt item (undelete)."""
+        return self.receipt_repo.undelete_item(item_id, receipt_id, user_id)
+
+    def update_item_name(self, item_id: int, receipt_id: int, new_name: str, user_id: int = None) -> bool:
+        """Update receipt item name."""
+        return self.receipt_repo.update_item_name(item_id, receipt_id, new_name, user_id)
+
     def update_item_amount(self, item_id: int, receipt_id: int, new_amount: float, user_id: int = None) -> bool:
         """Update receipt item total price."""
         return self.receipt_repo.update_item_amount(item_id, receipt_id, new_amount, user_id)
 
-    def update_item_category(self, item_id: int, receipt_id: int, category_id: int, user_id: int = None) -> bool:
-        """Update receipt item category."""
+    def update_item_category(self, item_id: int, receipt_id: int, category_id: int | None, user_id: int = None) -> bool:
+        """Update receipt item category (category_id can be None for uncategorized)."""
         return self.receipt_repo.update_item_category(item_id, receipt_id, category_id, user_id)
+
+    def create_item(self, receipt_id: int, user_id: int, item_name: str,
+                    quantity: float, unit_price: float, total_price: float,
+                    category_id: int = None, article_number: str = None) -> int:
+        """Create a new receipt item."""
+        return self.receipt_repo.create_item(receipt_id, user_id, item_name, quantity, unit_price, total_price, category_id, article_number)
 
     def get_recent_receipts(self, user_id: int, limit: int = 3) -> list[int]:
         """Get recent receipt IDs for a user."""
         return self.receipt_repo.get_recent_receipts(user_id, limit)
 
+    def get_all_receipts_for_list(self, user_id: int, include_deleted: bool = False) -> list[dict]:
+        """Get all receipts for display in list view (console UI)."""
+        return self.receipt_repo.get_all_receipts_for_list(user_id, include_deleted)
+
     def get_receipt_summary_data(self, receipt_id: int, user_id: int = None) -> dict | None:
         """Get receipt summary data for formatting."""
         return self.receipt_repo.get_receipt_summary_data(receipt_id, user_id)
+
+    def get_receipt_items_for_console(self, receipt_id: int, user_id: int = None) -> list[dict]:
+        """Get all receipt items for console UI (includes deleted items)."""
+        return self.receipt_repo.get_receipt_items_for_console(receipt_id, user_id)

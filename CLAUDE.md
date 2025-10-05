@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-This is a Telegram bot for processing receipt images and financial documents. The bot uses Claude AI for image analysis and text extraction.
+This is a Telegram bot for processing receipt images and financial documents. The bot uses Claude AI for image analysis and text extraction. Additionally, a console-based UI (using Textual framework) provides a local interface for bulk editing and managing receipts.
 
 ## Architecture
 
@@ -26,6 +26,12 @@ This is a Telegram bot for processing receipt images and financial documents. Th
 4. **Excel Generator** (`openpyxl`)
    - Creates formatted Excel reports
    - Generates summaries and analytics
+
+5. **Console UI** (`textual`)
+   - Terminal-based user interface for receipt management
+   - Full CRUD operations on receipts and items
+   - Sorting, filtering, and bulk editing capabilities
+   - Works over SSH for remote access
 
 ## Development Strategy
 
@@ -54,6 +60,7 @@ This is a Telegram bot for processing receipt images and financial documents. Th
   - `anthropic` for Claude AI integration
   - `openpyxl` for Excel generation
   - `Pillow==10.4.0`, `opencv-python-headless==4.10.0.84`, `numpy==2.1.3` for image processing
+  - `textual==1.0.0` for console UI
 - ✅ Basic bot with authorization implemented
   - User whitelist via `allowed_user_ids` in config.ini
   - `@authorized_only` decorator for command handlers
@@ -171,6 +178,21 @@ This is a Telegram bot for processing receipt images and financial documents. Th
   - Sorted by creation date (most recent first)
   - Only shows non-deleted receipts owned by the user
   - User-friendly error messages for invalid input
+- ✅ **Console UI for Receipt Management** (`console_ui/`)
+  - **Terminal-based interface** using Textual framework (works over SSH)
+  - **Receipt list view**: DataTable with 13 columns (ID, Date, Time, Merchant, City, Items, Currency, Totals, Discrepancy, Status, Category, Deleted)
+  - **Receipt detail view**: Shows receipt header and all items with full details
+  - **Item editing** (press 'e'): Modal dialog to edit name, amount, category
+  - **Item CRUD**: Add ('a'), delete ('d'), undelete ('u') items
+  - **Receipt delete/undelete**: Soft delete receipts ('d'/'u'), toggle visibility ('h')
+  - **Merchant editing** (press 'm'): Update merchant info (affects all receipts from that merchant)
+  - **Sorting** (press 's'): Cycle through Date/Merchant/Total/Status, toggle direction (↓/↑)
+  - **Filtering** (press 'f'): Filter by merchant name (partial match) and status
+  - **Receipt count**: Shows filtered/total count at top of list
+  - **Real-time updates**: Header totals and discrepancy indicators update immediately
+  - **Cursor preservation**: Selection stays on same item/receipt after operations
+  - **Authorization**: All operations verify user ownership at database level
+  - See [ADDING_UI.md](ADDING_UI.md) for complete implementation details
 
 ### Project Structure
 ```
@@ -204,6 +226,17 @@ receipts-bot-2/
 │   ├── transaction_repository.py # Transaction data operations
 │   ├── ai_analysis_repository.py # AI analysis data operations
 │   └── receipt_repository.py     # Receipt & items data operations
+│
+├── console_ui/             # Console UI (Textual TUI)
+│   ├── app.py             # Main TUI application entry point
+│   ├── screens/           # TUI screens
+│   │   ├── receipt_list.py    # Receipt list view (DataTable)
+│   │   └── receipt_detail.py  # Receipt detail view with items
+│   └── widgets/           # Reusable UI components
+│       ├── item_editor.py     # Item editing modal
+│       ├── item_creator.py    # Item creation modal
+│       ├── merchant_editor.py # Merchant editing modal
+│       └── filter_dialog.py   # Filtering modal
 │
 ├── images/                 # Image storage (gitignored)
 │   ├── orig/              # Original uploaded images
@@ -288,6 +321,40 @@ Example:
 # Stop when asked
 pkill -f "python bot.py"
 ```
+
+### Running the Console UI
+
+The console UI provides a local terminal interface for managing receipts:
+
+```bash
+# Run with specific user ID
+./venv/bin/python console_ui/app.py <user_id>
+
+# Or use first allowed user from config.ini
+./venv/bin/python console_ui/app.py
+```
+
+**Key Bindings:**
+- `Enter` - View receipt details
+- `Escape` - Go back / Quit
+- `e` - Edit item (name, amount, category)
+- `a` - Add new item
+- `d` - Delete item/receipt (soft delete)
+- `u` - Undelete item/receipt
+- `m` - Edit merchant information
+- `s` - Cycle sort column / toggle direction
+- `f` - Open filter dialog
+- `h` - Toggle deleted receipts visibility
+- `q` - Quit application
+
+**Features:**
+- Works over SSH (no GUI needed)
+- Zebra-striped tables for readability
+- Real-time total calculations
+- Cursor preservation during operations
+- All changes persist to PostgreSQL database
+
+See [ADDING_UI.md](ADDING_UI.md) for detailed implementation notes.
 
 ## Database Schema
 

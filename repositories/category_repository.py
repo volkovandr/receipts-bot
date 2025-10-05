@@ -40,6 +40,26 @@ class CategoryRepository:
             logger.error(f"Failed to retrieve categories: {e}")
             raise
 
+    def get_all_categories_with_ids(self) -> list[tuple[int, str]]:
+        """
+        Get all categories with their IDs.
+
+        Returns:
+            List of tuples (category_id, category_name) sorted by name
+        """
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute("SELECT category_id, category_name FROM category ORDER BY category_name;")
+                categories = cursor.fetchall()
+                logger.debug(f"Retrieved {len(categories)} categories with IDs from database")
+                return categories
+        except psycopg2.Error as e:
+            logger.error(f"Failed to retrieve categories with IDs: {e}")
+            raise
+
     def get_category_id_by_name(self, category_name: str) -> int | None:
         """
         Get category ID by name.

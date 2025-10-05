@@ -282,6 +282,63 @@ class ReceiptRepository:
             logger.error(f"Failed to mark receipt as deleted: {e}")
             raise
 
+    def undelete_receipt(self, receipt_id: int, user_id: int = None) -> bool:
+        """
+        Restore a soft-deleted receipt.
+
+        Args:
+            receipt_id: Receipt ID
+            user_id: Optional Telegram user ID for authorization (if None, no ownership check)
+
+        Returns:
+            True if receipt was restored, False if not found or not authorized
+        """
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+
+        try:
+            with self.connection.cursor() as cursor:
+                # Build query with optional user_id check
+                if user_id is not None:
+                    cursor.execute(
+                        """
+                        UPDATE receipt
+                        SET is_deleted = FALSE,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE receipt_id = %s AND user_id = %s
+                        RETURNING receipt_id;
+                        """,
+                        (receipt_id, user_id)
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        UPDATE receipt
+                        SET is_deleted = FALSE,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE receipt_id = %s
+                        RETURNING receipt_id;
+                        """,
+                        (receipt_id,)
+                    )
+
+                result = cursor.fetchone()
+                self.connection.commit()
+
+                if result:
+                    logger.info(f"Receipt {receipt_id} restored by user {user_id if user_id else 'N/A'}")
+                    return True
+                else:
+                    if user_id is not None:
+                        logger.warning(f"Receipt {receipt_id} not found or not owned by user {user_id}")
+                    else:
+                        logger.warning(f"Receipt {receipt_id} not found")
+                    return False
+        except psycopg2.Error as e:
+            self.connection.rollback()
+            logger.error(f"Failed to restore receipt: {e}")
+            raise
+
     def verify_receipt_owner(self, receipt_id: int, user_id: int) -> bool:
         """
         Verify that a receipt belongs to a specific user.
@@ -376,6 +433,73 @@ class ReceiptRepository:
                     return None
         except psycopg2.Error as e:
             logger.error(f"Failed to get receipt image path: {e}")
+            raise
+
+    def get_receipt_items_for_console(self, receipt_id: int, user_id: int = None) -> list[dict]:
+        """
+        Get all receipt items for console UI (includes deleted items, more details).
+
+        Args:
+            receipt_id: Receipt ID
+            user_id: Optional user ID for ownership verification
+
+        Returns:
+            List of item dictionaries with keys:
+            - item_id: int
+            - receipt_id: int
+            - item_name: str
+            - category_id: int (or None)
+            - category_name: str (or 'Uncategorized')
+            - quantity: Decimal
+            - unit_price: Decimal
+            - total_price: Decimal
+            - is_deleted: bool
+
+        Raises:
+            RuntimeError: If database not connected
+        """
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+
+        try:
+            with self.connection.cursor() as cursor:
+                # Build query with optional user_id check
+                if user_id is not None:
+                    cursor.execute(
+                        """
+                        SELECT ri.item_id, ri.receipt_id, ri.item_name, ri.category_id,
+                               COALESCE(c.category_name, 'Uncategorized') as category_name,
+                               ri.quantity, ri.unit_price, ri.total_price, ri.is_deleted
+                        FROM receipt_item ri
+                        LEFT JOIN category c ON ri.category_id = c.category_id
+                        JOIN receipt r ON ri.receipt_id = r.receipt_id
+                        WHERE ri.receipt_id = %s AND r.user_id = %s
+                        ORDER BY ri.item_id;
+                        """,
+                        (receipt_id, user_id)
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        SELECT ri.item_id, ri.receipt_id, ri.item_name, ri.category_id,
+                               COALESCE(c.category_name, 'Uncategorized') as category_name,
+                               ri.quantity, ri.unit_price, ri.total_price, ri.is_deleted
+                        FROM receipt_item ri
+                        LEFT JOIN category c ON ri.category_id = c.category_id
+                        WHERE ri.receipt_id = %s
+                        ORDER BY ri.item_id;
+                        """,
+                        (receipt_id,)
+                    )
+
+                columns = [desc[0] for desc in cursor.description]
+                results = []
+                for row in cursor.fetchall():
+                    results.append(dict(zip(columns, row)))
+                logger.debug(f"Retrieved {len(results)} items for receipt {receipt_id} (console UI)")
+                return results
+        except psycopg2.Error as e:
+            logger.error(f"Failed to get receipt items for console: {e}")
             raise
 
     def get_receipt_items_detailed(self, receipt_id: int, user_id: int = None) -> list[dict]:
@@ -510,6 +634,128 @@ class ReceiptRepository:
             logger.error(f"Failed to mark item as deleted: {e}")
             raise
 
+    def undelete_item(self, item_id: int, receipt_id: int, user_id: int = None) -> bool:
+        """
+        Restore a deleted receipt item (undelete).
+
+        Args:
+            item_id: Item ID
+            receipt_id: Receipt ID (for authorization)
+            user_id: Optional user ID for ownership verification
+
+        Returns:
+            True if item was restored, False if not found or not authorized
+        """
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+
+        try:
+            with self.connection.cursor() as cursor:
+                # Build query with ownership verification
+                if user_id is not None:
+                    cursor.execute(
+                        """
+                        UPDATE receipt_item
+                        SET is_deleted = FALSE,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE item_id = %s
+                          AND receipt_id = %s
+                          AND receipt_id IN (
+                              SELECT receipt_id FROM receipt
+                              WHERE receipt_id = %s AND user_id = %s
+                          )
+                        RETURNING item_id;
+                        """,
+                        (item_id, receipt_id, receipt_id, user_id)
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        UPDATE receipt_item
+                        SET is_deleted = FALSE,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE item_id = %s AND receipt_id = %s
+                        RETURNING item_id;
+                        """,
+                        (item_id, receipt_id)
+                    )
+
+                result = cursor.fetchone()
+                self.connection.commit()
+
+                if result:
+                    logger.info(f"Item {item_id} restored (undeleted)")
+                    return True
+                else:
+                    logger.warning(f"Item {item_id} not found or not authorized for receipt {receipt_id}")
+                    return False
+        except psycopg2.Error as e:
+            self.connection.rollback()
+            logger.error(f"Failed to restore item: {e}")
+            raise
+
+    def update_item_name(self, item_id: int, receipt_id: int, new_name: str, user_id: int = None) -> bool:
+        """
+        Update receipt item name.
+
+        Args:
+            item_id: Item ID
+            receipt_id: Receipt ID (for authorization)
+            new_name: New item name
+            user_id: Optional user ID for ownership verification
+
+        Returns:
+            True if item was updated, False if not found or not authorized
+        """
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+
+        try:
+            with self.connection.cursor() as cursor:
+                # Build query with ownership verification
+                if user_id is not None:
+                    cursor.execute(
+                        """
+                        UPDATE receipt_item
+                        SET item_name = %s,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE item_id = %s
+                          AND receipt_id = %s
+                          AND is_deleted = FALSE
+                          AND receipt_id IN (
+                              SELECT receipt_id FROM receipt
+                              WHERE receipt_id = %s AND user_id = %s
+                          )
+                        RETURNING item_id;
+                        """,
+                        (new_name, item_id, receipt_id, receipt_id, user_id)
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        UPDATE receipt_item
+                        SET item_name = %s,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE item_id = %s AND receipt_id = %s AND is_deleted = FALSE
+                        RETURNING item_id;
+                        """,
+                        (new_name, item_id, receipt_id)
+                    )
+
+                result = cursor.fetchone()
+                self.connection.commit()
+
+                if result:
+                    logger.info(f"Item {item_id} name updated to '{new_name}'")
+                    return True
+                else:
+                    logger.warning(f"Item {item_id} not found or not authorized for receipt {receipt_id}")
+                    return False
+        except psycopg2.Error as e:
+            self.connection.rollback()
+            logger.error(f"Failed to update item name: {e}")
+            raise
+
     def update_item_amount(self, item_id: int, receipt_id: int, new_amount: float, user_id: int = None) -> bool:
         """
         Update receipt item total price.
@@ -572,14 +818,14 @@ class ReceiptRepository:
             logger.error(f"Failed to update item amount: {e}")
             raise
 
-    def update_item_category(self, item_id: int, receipt_id: int, category_id: int, user_id: int = None) -> bool:
+    def update_item_category(self, item_id: int, receipt_id: int, category_id: int | None, user_id: int = None) -> bool:
         """
         Update receipt item category.
 
         Args:
             item_id: Item ID
             receipt_id: Receipt ID (for authorization)
-            category_id: New category ID
+            category_id: New category ID (or None for uncategorized)
             user_id: Optional user ID for ownership verification
 
         Returns:
@@ -666,6 +912,102 @@ class ReceiptRepository:
                 return receipt_ids
         except psycopg2.Error as e:
             logger.error(f"Failed to get recent receipts: {e}")
+            raise
+
+    def get_all_receipts_for_list(self, user_id: int, include_deleted: bool = False) -> list[dict]:
+        """
+        Get all receipts for display in a list view (console UI).
+
+        Args:
+            user_id: Telegram user ID
+            include_deleted: If True, include soft-deleted receipts in results
+
+        Returns:
+            List of dicts with keys:
+            - receipt_id: int
+            - transaction_date: date
+            - transaction_time: time
+            - merchant_name: str
+            - merchant_city: str
+            - item_count: int
+            - currency: str
+            - total_items: Decimal (sum of items)
+            - total_receipt: Decimal (receipt brutto amount)
+            - has_discrepancy: bool
+            - processing_status: str
+            - top_category: str (category with highest spending)
+            - is_deleted: bool
+        """
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+
+        try:
+            with self.connection.cursor() as cursor:
+                # Build WHERE clause based on include_deleted parameter
+                where_clause = "r.user_id = %s"
+                if not include_deleted:
+                    where_clause += " AND r.is_deleted = FALSE"
+
+                query = f"""
+                    WITH category_totals AS (
+                        SELECT
+                            ri.receipt_id,
+                            c.category_name,
+                            SUM(ri.total_price) AS category_total,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY ri.receipt_id
+                                ORDER BY SUM(ri.total_price) DESC
+                            ) AS rn
+                        FROM receipt_item ri
+                        LEFT JOIN category c ON ri.category_id = c.category_id
+                        WHERE ri.is_deleted = FALSE
+                        GROUP BY ri.receipt_id, c.category_name
+                    )
+                    SELECT
+                        r.receipt_id,
+                        r.merchant_id,
+                        COALESCE(t.date, r.created_at::date) AS transaction_date,
+                        t.time AS transaction_time,
+                        COALESCE(m.name, 'Unknown') AS merchant_name,
+                        COALESCE(m.city, '') AS merchant_city,
+                        COUNT(DISTINCT ri.item_id) AS item_count,
+                        COALESCE(t.currency, 'EUR') AS currency,
+                        COALESCE(SUM(ri.total_price), 0) AS total_items,
+                        COALESCE(t.brutto_amount, 0) AS total_receipt,
+                        (ABS(COALESCE(SUM(ri.total_price), 0) - COALESCE(t.brutto_amount, 0)) > 0.01) AS has_discrepancy,
+                        r.processing_status,
+                        COALESCE(ct.category_name, '') AS top_category,
+                        r.is_deleted
+                    FROM receipt r
+                    LEFT JOIN merchant m ON r.merchant_id = m.merchant_id
+                    LEFT JOIN transaction t ON r.transaction_id = t.transaction_id
+                    LEFT JOIN receipt_item ri ON r.receipt_id = ri.receipt_id AND ri.is_deleted = FALSE
+                    LEFT JOIN category_totals ct ON r.receipt_id = ct.receipt_id AND ct.rn = 1
+                    WHERE {where_clause}
+                    GROUP BY
+                        r.receipt_id,
+                        t.date,
+                        t.time,
+                        m.name,
+                        m.city,
+                        t.currency,
+                        t.brutto_amount,
+                        r.processing_status,
+                        r.created_at,
+                        ct.category_name,
+                        r.is_deleted
+                    ORDER BY COALESCE(t.date, r.created_at::date) DESC, COALESCE(t.time, r.created_at::time) DESC;
+                """
+
+                cursor.execute(query, (user_id,))
+                columns = [desc[0] for desc in cursor.description]
+                results = []
+                for row in cursor.fetchall():
+                    results.append(dict(zip(columns, row)))
+                logger.debug(f"Retrieved {len(results)} receipts for list view")
+                return results
+        except psycopg2.Error as e:
+            logger.error(f"Failed to get receipts for list: {e}")
             raise
 
     def get_receipt_summary_data(self, receipt_id: int, user_id: int = None) -> dict | None:
@@ -761,3 +1103,66 @@ class ReceiptRepository:
         except psycopg2.Error as e:
             logger.error(f"Failed to get receipt summary data: {e}")
             raise
+
+    def create_item(self, receipt_id: int, user_id: int, item_name: str,
+                    quantity: float, unit_price: float, total_price: float,
+                    category_id: int = None, article_number: str = None) -> int:
+        """
+        Create a new receipt item.
+
+        Args:
+            receipt_id: Receipt ID
+            user_id: User ID (for authorization)
+            item_name: Item name
+            quantity: Item quantity
+            unit_price: Unit price
+            total_price: Total price
+            category_id: Optional category ID
+            article_number: Optional article number
+
+        Returns:
+            item_id: The ID of the created item, or None if failed
+
+        Raises:
+            RuntimeError: If database not connected
+        """
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+
+        try:
+            with self.connection.cursor() as cursor:
+                # Verify user owns this receipt
+                cursor.execute(
+                    """
+                    SELECT user_id FROM receipt WHERE receipt_id = %s;
+                    """,
+                    (receipt_id,)
+                )
+                result = cursor.fetchone()
+
+                if not result:
+                    logger.warning(f"Receipt {receipt_id} not found")
+                    return None
+
+                if result[0] != user_id:
+                    logger.warning(f"User {user_id} attempted to create item for receipt {receipt_id} owned by user {result[0]}")
+                    return None
+
+                # Create the item
+                cursor.execute(
+                    """
+                    INSERT INTO receipt_item (receipt_id, item_name, article_number, quantity, unit_price, total_price, category_id)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    RETURNING item_id;
+                    """,
+                    (receipt_id, item_name, article_number, quantity, unit_price, total_price, category_id)
+                )
+                item_id = cursor.fetchone()[0]
+                self.connection.commit()
+                logger.info(f"Created item {item_id} for receipt {receipt_id}: '{item_name}' x {quantity} @ {unit_price} = {total_price}")
+                return item_id
+
+        except psycopg2.Error as e:
+            self.connection.rollback()
+            logger.error(f"Failed to create item: {e}")
+            return None

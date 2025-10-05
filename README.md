@@ -1,10 +1,12 @@
 # Receipts Bot
 
-A Telegram bot that processes receipt images using Claude AI vision capabilities, stores structured data in PostgreSQL, and provides interactive receipt management.
+A Telegram bot that processes receipt images using Claude AI vision capabilities, stores structured data in PostgreSQL, and provides interactive receipt management. Includes a terminal-based console UI for efficient bulk editing and management.
 
 ## Features
 
 ### ✅ Implemented
+
+**Telegram Bot:**
 - 📸 **Image Processing**: Accept receipt images from camera or gallery
 - 🔍 **Smart Pre-processing**: Automatic cropping, grayscale conversion, and optimization
 - 🤖 **AI Analysis**: Claude AI vision API extracts merchant, items, prices, and categories
@@ -17,10 +19,21 @@ A Telegram bot that processes receipt images using Claude AI vision capabilities
 - 🔒 **Authorization**: Whitelist-based access control
 - 💰 **Total Validation**: Automatic consistency checks between receipt total and item sum
 
+**Console UI (Terminal Interface):**
+- 🖥️ **Receipt List View**: Browse all receipts in a sortable, filterable table
+- 📋 **Receipt Detail View**: View all items with real-time total calculations
+- ✏️ **Item Editing**: Edit name, amount, and category with modal dialogs
+- ➕ **Item Creation**: Add new items with auto-calculated totals
+- 🗑️ **Delete/Undelete**: Soft delete items and receipts with easy restore
+- 🏪 **Merchant Editing**: Update merchant info across all receipts
+- 🔀 **Sorting**: Sort by Date, Merchant, Total, or Status (toggle direction)
+- 🔍 **Filtering**: Filter by merchant name and status
+- 📊 **Receipt Count**: Shows filtered/total count
+- 🔐 **SSH Compatible**: Works over SSH for remote management
+
 ### 🚧 Planned
 - 📊 Excel report generation
 - 📈 Spending analytics and summaries
-- 📅 Date range filtering
 - 💱 Multi-currency support
 
 ## Setup
@@ -100,8 +113,9 @@ CREATE EXTENSION pg_trgm;
 
 3. Add your categories in the `category` table after the bot has been started and created the schema.
 
-### 4. Run the Bot
+### 4. Run the Applications
 
+**Telegram Bot:**
 ```bash
 python bot.py
 ```
@@ -111,16 +125,26 @@ Or run in background (recommended for development):
 ./venv/bin/python bot.py &
 ```
 
+**Console UI:**
+```bash
+# Run with specific user ID
+./venv/bin/python console_ui/app.py <user_id>
+
+# Or use first allowed user from config.ini
+./venv/bin/python console_ui/app.py
+```
+
 ## Usage
 
-### Commands
+### Telegram Bot
 
+**Commands:**
 - `/start` - Initialize and show welcome message
 - `/hello` - Get a friendly greeting
 - `/receipts` - Show last 3 receipts (default)
 - `/receipts N` - Show last N receipts (max 10)
 
-### Processing Receipts
+**Processing Receipts:**
 
 1. Send a receipt image to the bot (photo or document)
 2. Bot automatically:
@@ -136,7 +160,7 @@ Or run in background (recommended for development):
    - 🗑️ **Delete receipt** - Soft delete (preserves data)
    - 🔍 **View processed image** - See the exact image analyzed by AI
 
-### Editing Receipts
+**Editing Receipts:**
 
 1. Click "✏️ Edit receipt" button
 2. Navigate items with Previous/Next buttons
@@ -145,6 +169,39 @@ Or run in background (recommended for development):
    - Edit amount (validates 0.01-99999.99)
    - Change category (fuzzy search with 30% similarity)
    - Create new category on-the-fly
+
+### Console UI
+
+**Key Bindings:**
+- `Enter` - View receipt details
+- `Escape` - Go back / Quit
+- `e` - Edit item (name, amount, category)
+- `a` - Add new item
+- `d` - Delete item/receipt (soft delete)
+- `u` - Undelete item/receipt
+- `m` - Edit merchant information
+- `s` - Cycle sort column / toggle direction (↓/↑)
+- `f` - Open filter dialog
+- `h` - Toggle deleted receipts visibility
+- `q` - Quit application
+
+**Workflow:**
+
+1. Launch console UI with your user ID
+2. Browse receipts in the list view (use arrow keys)
+3. Press `Enter` to view receipt details and items
+4. Edit, add, or delete items as needed
+5. Press `Escape` to return to list view
+6. Use `s` to sort by different columns
+7. Use `f` to filter by merchant or status
+8. All changes are saved automatically to the database
+
+**Features:**
+- Real-time total calculations (updates as you edit)
+- Discrepancy warnings when totals don't match
+- Zebra-striped tables for better readability
+- Cursor preservation during operations
+- Works perfectly over SSH
 
 ## Project Structure
 
@@ -179,6 +236,17 @@ receipts-bot-2/
 │   ├── transaction_repository.py # Transaction operations
 │   ├── ai_analysis_repository.py # AI analysis tracking
 │   └── receipt_repository.py     # Receipt & items operations
+│
+├── console_ui/             # Console UI (Textual TUI)
+│   ├── app.py             # Main TUI application entry point
+│   ├── screens/           # TUI screens
+│   │   ├── receipt_list.py    # Receipt list view (DataTable)
+│   │   └── receipt_detail.py  # Receipt detail view with items
+│   └── widgets/           # Reusable UI components
+│       ├── item_editor.py     # Item editing modal
+│       ├── item_creator.py    # Item creation modal
+│       ├── merchant_editor.py # Merchant editing modal
+│       └── filter_dialog.py   # Filtering modal
 │
 ├── images/                 # Image storage (gitignored)
 │   ├── orig/              # Original uploaded images
