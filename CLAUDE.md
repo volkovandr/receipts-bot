@@ -165,7 +165,6 @@ This is a Telegram bot for processing receipt images and financial documents. Th
   - **Smart navigation**: Edit operations return to item view; only "Back to summary" exits to summary
   - **Conversation state**: Uses `context.user_data` for multi-step editing flows
   - **Authorization**: All operations verify user ownership at SQL and application level
-  - Database migration: `migrations/001_add_receipt_item_is_deleted.sql`
 - ✅ **Receipt Listing Command** (`handlers/commands.py`, `repositories/receipt_repository.py`)
   - `/receipts` command shows recent receipts (default: 3 receipts)
   - Optional argument: `/receipts N` to show N receipts (max 10)
