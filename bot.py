@@ -75,10 +75,12 @@ def main() -> None:
         claude_service = ClaudeService(
             api_key=config.anthropic_api_key,
             model=config.anthropic_model,
-            prompt_template_path=config.anthropic_prompt_template
+            prompt_template_path=config.anthropic_prompt_template,
+            enable_prompt_caching=config.anthropic_enable_prompt_caching
         )
         logger.info(f"Claude AI service initialized - Model: {config.anthropic_model}, "
-                   f"Prompt: {config.anthropic_prompt_template}")
+                   f"Prompt: {config.anthropic_prompt_template}, "
+                   f"Caching: {config.anthropic_enable_prompt_caching}")
     else:
         logger.warning("Anthropic API key not configured - AI analysis will not be available")
 
@@ -117,7 +119,7 @@ def main() -> None:
 
     # Register message handlers
     application.add_handler(MessageHandler(filters.PHOTO, authorized_photo))
-    application.add_handler(MessageHandler(filters.Document.IMAGE, authorized_document))
+    application.add_handler(MessageHandler(filters.Document.IMAGE | filters.Document.PDF, authorized_document))
     # Text message handler for editing workflows (must be registered AFTER specific handlers)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
 

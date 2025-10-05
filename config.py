@@ -33,6 +33,7 @@ class Config:
         self.anthropic_api_key = self.config.get('anthropic', 'api_key', fallback=None)
         self.anthropic_prompt_template = self.config.get('anthropic', 'prompt_template', fallback='prompt-combined.txt')
         self.anthropic_model = self.config.get('anthropic', 'model', fallback='claude-sonnet-4-5-20250929')
+        self.anthropic_enable_prompt_caching = self.config.getboolean('anthropic', 'enable_prompt_caching', fallback=False)
 
     def _parse_allowed_user_ids(self) -> Set[int]:
         """Parse allowed user IDs from config."""

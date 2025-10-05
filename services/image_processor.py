@@ -33,12 +33,13 @@ class ImageProcessor:
         self.processed_dir.mkdir(parents=True, exist_ok=True)
         self.max_height = 1200
 
-    def process_receipt_image(self, input_path: str) -> Optional[str]:
+    def process_receipt_image(self, input_path: str, skip_crop: bool = False) -> Optional[str]:
         """
         Process a receipt image: crop, grayscale, resize.
 
         Args:
             input_path: Path to the original image
+            skip_crop: If True, skip the cropping step (e.g., for pre-scanned PDFs)
 
         Returns:
             Path to processed image, or None if processing failed
@@ -50,13 +51,17 @@ class ImageProcessor:
                 logger.error(f"Failed to read image: {input_path}")
                 return None
 
-            logger.info(f"Processing image: {input_path}, shape: {image.shape}")
+            logger.info(f"Processing image: {input_path}, shape: {image.shape}, skip_crop: {skip_crop}")
 
             # Step 1: Convert to grayscale first (simplifies detection)
             grayscale = self._convert_to_grayscale(image)
 
-            # Step 2: Crop to receipt (works better on grayscale)
-            cropped = self._crop_receipt(grayscale)
+            # Step 2: Crop to receipt (skip for PDFs as they are already scanned)
+            if skip_crop:
+                cropped = grayscale
+                logger.info("Skipping crop step (already scanned)")
+            else:
+                cropped = self._crop_receipt(grayscale)
 
             # Step 3: Resize if needed
             resized = self._resize_image(cropped)

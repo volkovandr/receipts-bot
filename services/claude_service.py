@@ -17,7 +17,8 @@ class ClaudeService:
     """Service for analyzing receipt images using Claude AI."""
 
     def __init__(self, api_key: str, model: str = "claude-sonnet-4-5-20250929",
-                 prompt_template_path: str = "prompt-combined.txt"):
+                 prompt_template_path: str = "prompt-combined.txt",
+                 enable_prompt_caching: bool = False):
         """
         Initialize Claude service.
 
@@ -25,10 +26,12 @@ class ClaudeService:
             api_key: Anthropic API key
             model: Claude model name to use
             prompt_template_path: Path to prompt template file
+            enable_prompt_caching: Enable prompt caching to reduce API costs
         """
         self.client = anthropic.Anthropic(api_key=api_key)
         self.model = model
         self.prompt_template_path = prompt_template_path
+        self.enable_prompt_caching = enable_prompt_caching
 
     def analyze_receipt(
         self,
@@ -64,13 +67,22 @@ class ClaudeService:
         # Determine media type from file extension
         media_type = self._get_media_type(image_path)
 
-        logger.info(f"Analyzing receipt image: {image_path}")
+        logger.info(f"Analyzing receipt image: {image_path} (caching: {self.enable_prompt_caching})")
 
         try:
+            # Prepare system message with optional cache_control
+            system_message = {
+                "type": "text",
+                "text": prompt
+            }
+            if self.enable_prompt_caching:
+                system_message["cache_control"] = {"type": "ephemeral"}
+
             # Call Claude API with vision
             response = self.client.messages.create(
                 model=self.model,
                 max_tokens=4096,
+                system=[system_message],
                 messages=[
                     {
                         "role": "user",
@@ -82,10 +94,6 @@ class ClaudeService:
                                     "media_type": media_type,
                                     "data": image_data,
                                 },
-                            },
-                            {
-                                "type": "text",
-                                "text": prompt
                             }
                         ],
                     }
@@ -134,8 +142,16 @@ class ClaudeService:
             input_tokens = response.usage.input_tokens
             output_tokens = response.usage.output_tokens
 
+            # Log cache statistics if caching is enabled
+            cache_info = ""
+            if self.enable_prompt_caching and hasattr(response.usage, 'cache_creation_input_tokens'):
+                cache_creation = getattr(response.usage, 'cache_creation_input_tokens', 0)
+                cache_read = getattr(response.usage, 'cache_read_input_tokens', 0)
+                if cache_creation > 0 or cache_read > 0:
+                    cache_info = f", cache: {cache_creation} created / {cache_read} read"
+
             logger.info(f"Receipt analysis successful, status: {receipt_data.get('extraction_status', 'unknown')}, "
-                       f"tokens: {input_tokens} in / {output_tokens} out")
+                       f"tokens: {input_tokens} in / {output_tokens} out{cache_info}")
             return receipt_data, input_tokens, output_tokens
 
         except anthropic.APIError as e:
