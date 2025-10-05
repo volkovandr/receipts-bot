@@ -60,6 +60,7 @@ This is a Telegram bot for processing receipt images and financial documents. Th
   - `anthropic` for Claude AI integration
   - `openpyxl` for Excel generation
   - `Pillow==10.4.0`, `opencv-python-headless==4.10.0.84`, `numpy==2.1.3` for image processing
+  - `pdf2image==1.17.0` for PDF document support
   - `textual==1.0.0` for console UI
 - ✅ Basic bot with authorization implemented
   - User whitelist via `allowed_user_ids` in config.ini
@@ -80,15 +81,18 @@ This is a Telegram bot for processing receipt images and financial documents. Th
   - Schema created: `app_receipts_bot`
   - Version tracking table implemented
   - Complete data model with 5 tables: user, image, receipt, receipt_item, category
-- ✅ **Image handling** (`bot.py`)
-  - Handles both photo messages (camera) and document messages (gallery)
-  - Downloads images to `./images/orig/` directory
+- ✅ **Image handling** (`handlers/images.py`, `bot.py`)
+  - Handles photo messages (camera), document messages (gallery), and PDF files
+  - **PDF support**: Converts PDF documents to high-quality images (300 DPI)
+  - Downloads files to `./images/orig/` directory
   - Generates unique filenames: `{user_id}_{timestamp}.{ext}`
   - Stores image metadata in database (file_id, path, size, mime_type)
   - Creates receipt record with status 'created' when image is received
   - Links receipt to image and user
+  - **Requires**: `poppler-utils` system package for PDF conversion (`sudo apt install poppler-utils`)
 - ✅ **Image pre-processing** (`services/image_processor.py`)
   - **Grayscale conversion** - Converts to grayscale first for optimal processing
+  - **Smart cropping** - Skip cropping for PDFs (already scanned), apply to photos
   - **Multi-strategy receipt detection and cropping**:
     - Strategy 1: Edge detection with contour filtering
     - Strategy 2: Brightness-based detection (best for dark backgrounds)

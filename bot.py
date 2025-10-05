@@ -119,7 +119,7 @@ def main() -> None:
 
     # Register message handlers
     application.add_handler(MessageHandler(filters.PHOTO, authorized_photo))
-    application.add_handler(MessageHandler(filters.Document.IMAGE, authorized_document))
+    application.add_handler(MessageHandler(filters.Document.IMAGE | filters.Document.PDF, authorized_document))
     # Text message handler for editing workflows (must be registered AFTER specific handlers)
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
 
