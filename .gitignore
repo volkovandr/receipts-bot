@@ -21,9 +21,8 @@ wheels/
 .installed.cfg
 *.egg
 
-# Environment variables
-.env
-.env.local
+# Configuration files
+config.ini
 
 # IDE
 .vscode/
@@ -50,4 +49,9 @@ Thumbs.db
 # Temporary files
 temp/
 tmp/
-receipts/
+
+
+# Private files
+images/
+categories.txt
+categories.sql
