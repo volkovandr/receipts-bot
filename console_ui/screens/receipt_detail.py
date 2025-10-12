@@ -75,6 +75,18 @@ class ReceiptDetailScreen(Screen):
         # Load items
         self.load_items()
 
+    def refresh_receipt_data(self) -> None:
+        """Refresh receipt_data from database to get latest total_receipt value."""
+        try:
+            receipts = self.db.get_all_receipts_for_list(self.user_id, include_deleted=True)
+            for receipt in receipts:
+                if receipt['receipt_id'] == self.receipt_id:
+                    self.receipt_data = receipt
+                    logger.debug(f"Receipt data refreshed: total_receipt={receipt.get('total_receipt')}")
+                    break
+        except Exception as e:
+            logger.error(f"Failed to refresh receipt data: {e}")
+
     def show_receipt_header(self) -> None:
         """Display receipt header information with current totals calculated from items."""
         header = self.query_one("#receipt_header", Static)
@@ -133,13 +145,18 @@ Total (Receipt): {currency} {total_receipt_str}{discrepancy_info}
             container.add_class("no-discrepancy")
             container.remove_class("discrepancy")
 
-    def load_items(self, preserve_cursor: bool = False) -> None:
+    def load_items(self, preserve_cursor: bool = False, refresh_receipt: bool = False) -> None:
         """Load items from database and populate table.
 
         Args:
             preserve_cursor: If True, restore cursor to the same row index after reload
+            refresh_receipt: If True, refresh receipt_data from database (for updated totals)
         """
         table = self.query_one("#items_table", DataTable)
+
+        # Refresh receipt data if requested (e.g., after editing total)
+        if refresh_receipt:
+            self.refresh_receipt_data()
 
         # Save cursor position if requested
         saved_cursor_row = table.cursor_row if preserve_cursor else None
@@ -430,9 +447,9 @@ Total (Receipt): {currency} {total_receipt_str}{discrepancy_info}
         )
 
         if result:
-            # Reload items to refresh header (which recalculates discrepancy)
-            self.load_items(preserve_cursor=True)
-            self.notify("Receipt total updated - please review discrepancy status", severity="information")
+            # Reload items with receipt refresh to update total and recalculate discrepancy
+            self.load_items(preserve_cursor=True, refresh_receipt=True)
+            self.notify("Receipt total updated - discrepancy status recalculated", severity="information")
 
     def action_back(self) -> None:
         """Go back to receipt list."""
