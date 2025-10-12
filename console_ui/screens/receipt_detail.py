@@ -216,6 +216,12 @@ Total (Receipt): {currency} {total_receipt_str}{discrepancy_info}
                 key="error"
             )
 
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        """Handle row selection (Enter key) in the items table."""
+        logger.info(f"Item row selected: {event.row_key}")
+        # Trigger edit action when Enter is pressed on a row
+        self.action_edit_item()
+
     def action_add_item(self) -> None:
         """Open modal to add a new item to the receipt."""
         try:
