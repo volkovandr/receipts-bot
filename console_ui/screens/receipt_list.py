@@ -26,10 +26,13 @@ class ReceiptListScreen(Screen):
     BINDINGS = [
         Binding("q", "quit", "Quit"),
         Binding("escape", "quit", "Quit", show=False),
-        Binding("d", "delete_receipt", "Delete"),
-        Binding("u", "undelete_receipt", "Undelete"),
+        Binding("delete", "delete_receipt", "Delete"),
+        Binding("ctrl+delete", "undelete_receipt", "Undelete"),
         Binding("h", "toggle_deleted", "Hide/Show Deleted"),
         Binding("m", "edit_merchant", "Edit Merchant"),
+        Binding("M", "switch_merchant", "Switch Merchant"),
+        Binding("t", "edit_date", "Edit Date/Time"),
+        Binding("T", "edit_total", "Edit Total"),
         Binding("s", "cycle_sort", "Sort"),
         Binding("f", "filter", "Filter"),
     ]
@@ -456,6 +459,149 @@ class ReceiptListScreen(Screen):
 
         if result:
             # Reload receipts to show updated merchant info
+            self.load_receipts(preserve_cursor=True)
+
+    def action_switch_merchant(self) -> None:
+        """Switch receipt to a different merchant."""
+        table = self.query_one(DataTable)
+
+        if table.cursor_row is not None and table.row_count > 0:
+            try:
+                row = table.ordered_rows[table.cursor_row]
+                receipt_id = int(row.key.value)
+
+                # Find receipt data to get current merchant
+                receipt_data = None
+                for receipt in self.receipts:
+                    if receipt['receipt_id'] == receipt_id:
+                        receipt_data = receipt
+                        break
+
+                if not receipt_data:
+                    self.notify("Receipt data not found", severity="error")
+                    return
+
+                # Get current merchant details (may be None)
+                current_merchant = None
+                merchant_id = receipt_data.get('merchant_id')
+                if merchant_id:
+                    current_merchant = self.db.get_merchant_by_id(merchant_id)
+
+                # Use run_worker to handle async modal
+                self.run_worker(self._switch_merchant_worker(receipt_id, current_merchant), exclusive=True)
+
+            except (ValueError, AttributeError, IndexError) as e:
+                logger.error(f"Error in action_switch_merchant: {e}", exc_info=True)
+                self.notify(f"Error: {str(e)}", severity="error")
+
+    async def _switch_merchant_worker(self, receipt_id: int, current_merchant: dict | None) -> None:
+        """Worker to handle merchant switching modal."""
+        from console_ui.widgets.merchant_switcher import MerchantSwitcherModal
+        from console_ui.widgets.merchant_creator import MerchantCreatorModal
+
+        result = await self.app.push_screen_wait(
+            MerchantSwitcherModal(self.db, receipt_id, current_merchant)
+        )
+
+        if result:
+            # Check if we need to create a new merchant
+            if isinstance(result, tuple) and result[0] == "create_new":
+                default_name = result[1]
+                # Open merchant creator modal
+                create_result = await self.app.push_screen_wait(
+                    MerchantCreatorModal(self.db, receipt_id, default_name)
+                )
+
+                if create_result:
+                    # Reload receipts to show updated merchant info
+                    self.load_receipts(preserve_cursor=True)
+            else:
+                # Merchant was switched successfully
+                # Reload receipts to show updated merchant info
+                self.load_receipts(preserve_cursor=True)
+
+    def action_edit_date(self) -> None:
+        """Edit receipt date and time."""
+        table = self.query_one(DataTable)
+
+        if table.cursor_row is not None and table.row_count > 0:
+            try:
+                row = table.ordered_rows[table.cursor_row]
+                receipt_id = int(row.key.value)
+
+                # Find receipt data to get current date/time
+                receipt_data = None
+                for receipt in self.receipts:
+                    if receipt['receipt_id'] == receipt_id:
+                        receipt_data = receipt
+                        break
+
+                if not receipt_data:
+                    self.notify("Receipt data not found", severity="error")
+                    return
+
+                current_date = receipt_data.get('transaction_date')
+                current_time = receipt_data.get('transaction_time')
+
+                # Use run_worker to handle async modal
+                self.run_worker(self._edit_date_worker(receipt_id, current_date, current_time), exclusive=True)
+
+            except (ValueError, AttributeError, IndexError) as e:
+                logger.error(f"Error in action_edit_date: {e}", exc_info=True)
+                self.notify(f"Error: {str(e)}", severity="error")
+
+    async def _edit_date_worker(self, receipt_id: int, current_date, current_time) -> None:
+        """Worker to handle date/time editing modal."""
+        from console_ui.widgets.receipt_date_editor import ReceiptDateEditorModal
+
+        result = await self.app.push_screen_wait(
+            ReceiptDateEditorModal(self.db, receipt_id, self.user_id, current_date, current_time)
+        )
+
+        if result:
+            # Reload receipts to show updated date/time
+            self.load_receipts(preserve_cursor=True)
+
+    def action_edit_total(self) -> None:
+        """Edit receipt total amount."""
+        table = self.query_one(DataTable)
+
+        if table.cursor_row is not None and table.row_count > 0:
+            try:
+                row = table.ordered_rows[table.cursor_row]
+                receipt_id = int(row.key.value)
+
+                # Find receipt data to get current total and currency
+                receipt_data = None
+                for receipt in self.receipts:
+                    if receipt['receipt_id'] == receipt_id:
+                        receipt_data = receipt
+                        break
+
+                if not receipt_data:
+                    self.notify("Receipt data not found", severity="error")
+                    return
+
+                current_total = receipt_data.get('total_receipt')
+                currency = receipt_data.get('currency', 'EUR')
+
+                # Use run_worker to handle async modal
+                self.run_worker(self._edit_total_worker(receipt_id, current_total, currency), exclusive=True)
+
+            except (ValueError, AttributeError, IndexError) as e:
+                logger.error(f"Error in action_edit_total: {e}", exc_info=True)
+                self.notify(f"Error: {str(e)}", severity="error")
+
+    async def _edit_total_worker(self, receipt_id: int, current_total, currency: str) -> None:
+        """Worker to handle total editing modal."""
+        from console_ui.widgets.receipt_total_editor import ReceiptTotalEditorModal
+
+        result = await self.app.push_screen_wait(
+            ReceiptTotalEditorModal(self.db, receipt_id, self.user_id, current_total, currency)
+        )
+
+        if result:
+            # Reload receipts to show updated total
             self.load_receipts(preserve_cursor=True)
 
     def action_cycle_sort(self) -> None:

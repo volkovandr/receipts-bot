@@ -1166,3 +1166,117 @@ class ReceiptRepository:
             self.connection.rollback()
             logger.error(f"Failed to create item: {e}")
             return None
+
+    def update_receipt_merchant(self, receipt_id: int, merchant_id: int, user_id: int = None) -> bool:
+        """
+        Update receipt's merchant.
+
+        Args:
+            receipt_id: Receipt ID
+            merchant_id: New merchant ID
+            user_id: User ID (for authorization, optional)
+
+        Returns:
+            True if updated successfully, False otherwise
+        """
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+
+        try:
+            with self.connection.cursor() as cursor:
+                # Verify user owns this receipt (if user_id provided)
+                if user_id is not None:
+                    cursor.execute(
+                        """
+                        SELECT user_id FROM receipt WHERE receipt_id = %s;
+                        """,
+                        (receipt_id,)
+                    )
+                    result = cursor.fetchone()
+
+                    if not result:
+                        logger.warning(f"Receipt {receipt_id} not found")
+                        return False
+
+                    if result[0] != user_id:
+                        logger.warning(f"User {user_id} attempted to update merchant for receipt {receipt_id} owned by user {result[0]}")
+                        return False
+
+                # Update merchant
+                cursor.execute(
+                    """
+                    UPDATE receipt
+                    SET merchant_id = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE receipt_id = %s
+                    RETURNING receipt_id;
+                    """,
+                    (merchant_id, receipt_id)
+                )
+                result = cursor.fetchone()
+                self.connection.commit()
+
+                if result:
+                    logger.info(f"Receipt {receipt_id} merchant updated to {merchant_id}")
+                    return True
+                else:
+                    logger.warning(f"Receipt {receipt_id} not found")
+                    return False
+
+        except psycopg2.Error as e:
+            self.connection.rollback()
+            logger.error(f"Failed to update receipt merchant: {e}")
+            raise
+
+    def get_receipt_transaction_id(self, receipt_id: int, user_id: int = None) -> int | None:
+        """
+        Get transaction_id for a receipt.
+
+        Args:
+            receipt_id: Receipt ID
+            user_id: User ID (for authorization, optional)
+
+        Returns:
+            transaction_id or None if not found or not authorized
+        """
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+
+        try:
+            with self.connection.cursor() as cursor:
+                # Verify user owns this receipt (if user_id provided)
+                if user_id is not None:
+                    cursor.execute(
+                        """
+                        SELECT transaction_id, user_id
+                        FROM receipt
+                        WHERE receipt_id = %s;
+                        """,
+                        (receipt_id,)
+                    )
+                    result = cursor.fetchone()
+
+                    if not result:
+                        logger.warning(f"Receipt {receipt_id} not found")
+                        return None
+
+                    if result[1] != user_id:
+                        logger.warning(f"User {user_id} attempted to access receipt {receipt_id} owned by user {result[1]}")
+                        return None
+
+                    return result[0]
+                else:
+                    cursor.execute(
+                        """
+                        SELECT transaction_id
+                        FROM receipt
+                        WHERE receipt_id = %s;
+                        """,
+                        (receipt_id,)
+                    )
+                    result = cursor.fetchone()
+                    return result[0] if result else None
+
+        except psycopg2.Error as e:
+            logger.error(f"Failed to get receipt transaction_id: {e}")
+            raise

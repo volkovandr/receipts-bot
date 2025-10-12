@@ -42,6 +42,15 @@ class ReceiptsApp(App):
         height: 1fr;
     }
 
+    /* Discrepancy status styling */
+    #detail_container.discrepancy {
+        background: $error 10%;
+    }
+
+    #detail_container.no-discrepancy {
+        background: $success 10%;
+    }
+
     #items_table {
         height: 1fr;
     }

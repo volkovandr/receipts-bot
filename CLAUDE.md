@@ -186,14 +186,18 @@ This is a Telegram bot for processing receipt images and financial documents. Th
   - **Terminal-based interface** using Textual framework (works over SSH)
   - **Receipt list view**: DataTable with 13 columns (ID, Date, Time, Merchant, City, Items, Currency, Totals, Discrepancy, Status, Category, Deleted)
   - **Receipt detail view**: Shows receipt header and all items with full details
-  - **Item editing** (press 'e'): Modal dialog to edit name, amount, category
-  - **Item CRUD**: Add ('a'), delete ('d'), undelete ('u') items
-  - **Receipt delete/undelete**: Soft delete receipts ('d'/'u'), toggle visibility ('h')
+  - **Item editing** (press 'Enter'): Modal dialog to edit name, amount, category
+  - **Item CRUD**: Add ('a'), delete ('Delete'), undelete ('Ctrl+Delete') items
+  - **Receipt delete/undelete**: Soft delete receipts ('Delete'/'Ctrl+Delete'), toggle visibility ('h')
   - **Merchant editing** (press 'm'): Update merchant info (affects all receipts from that merchant)
+  - **Merchant switching** (press 'Shift+M'): Switch receipt to different merchant with search or create new
+  - **Date/time editing** (press 't'): Edit receipt transaction date and time with validation
+  - **Total amount editing** (press 'Shift+T'): Edit receipt total amount with validation
   - **Sorting** (press 's'): Cycle through Date/Merchant/Total/Status, toggle direction (↓/↑)
   - **Filtering** (press 'f'): Filter by merchant name (partial match) and status
   - **Receipt count**: Shows filtered/total count at top of list
   - **Real-time updates**: Header totals and discrepancy indicators update immediately
+  - **Visual discrepancy indicators**: Receipt detail view shows discrepancy amount and uses color-coded background (red for discrepancy, green when resolved)
   - **Cursor preservation**: Selection stays on same item/receipt after operations
   - **Authorization**: All operations verify user ownership at database level
   - See [ADDING_UI.md](ADDING_UI.md) for complete implementation details
@@ -237,10 +241,14 @@ receipts-bot-2/
 │   │   ├── receipt_list.py    # Receipt list view (DataTable)
 │   │   └── receipt_detail.py  # Receipt detail view with items
 │   └── widgets/           # Reusable UI components
-│       ├── item_editor.py     # Item editing modal
-│       ├── item_creator.py    # Item creation modal
-│       ├── merchant_editor.py # Merchant editing modal
-│       └── filter_dialog.py   # Filtering modal
+│       ├── item_editor.py          # Item editing modal
+│       ├── item_creator.py         # Item creation modal
+│       ├── merchant_editor.py      # Merchant editing modal
+│       ├── merchant_switcher.py    # Merchant switching modal (search existing)
+│       ├── merchant_creator.py     # Merchant creation modal (create new)
+│       ├── receipt_date_editor.py  # Receipt date/time editing modal
+│       ├── receipt_total_editor.py # Receipt total amount editing modal
+│       └── filter_dialog.py        # Filtering modal
 │
 ├── images/                 # Image storage (gitignored)
 │   ├── orig/              # Original uploaded images
@@ -339,13 +347,15 @@ The console UI provides a local terminal interface for managing receipts:
 ```
 
 **Key Bindings:**
-- `Enter` - View receipt details
+- `Enter` - View receipt details (in list) / Edit item (in detail view)
 - `Escape` - Go back / Quit
-- `e` - Edit item (name, amount, category)
 - `a` - Add new item
-- `d` - Delete item/receipt (soft delete)
-- `u` - Undelete item/receipt
+- `Delete` - Delete item/receipt (soft delete)
+- `Ctrl+Delete` - Undelete item/receipt
 - `m` - Edit merchant information
+- `Shift+M` - Switch receipt to different merchant (search or create new)
+- `t` - Edit receipt date and time
+- `Shift+T` - Edit receipt total amount
 - `s` - Cycle sort column / toggle direction
 - `f` - Open filter dialog
 - `h` - Toggle deleted receipts visibility

@@ -239,3 +239,116 @@ class MerchantRepository:
         except psycopg2.Error as e:
             logger.error(f"Failed to get receipt count by merchant: {e}")
             raise
+
+    def get_all_merchants(self) -> list[dict]:
+        """
+        Get all merchants.
+
+        Returns:
+            List of dictionaries with keys: merchant_id, name, city, country, address, logo_description
+        """
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT merchant_id, name, city, country, address, logo_description
+                    FROM merchant
+                    ORDER BY LOWER(name);
+                    """
+                )
+                results = cursor.fetchall()
+
+                merchants = []
+                for row in results:
+                    merchants.append({
+                        'merchant_id': row[0],
+                        'name': row[1],
+                        'city': row[2],
+                        'country': row[3],
+                        'address': row[4],
+                        'logo_description': row[5]
+                    })
+                return merchants
+        except psycopg2.Error as e:
+            logger.error(f"Failed to get all merchants: {e}")
+            raise
+
+    def find_merchant_by_name(self, name: str) -> dict | None:
+        """
+        Find merchant by name (case-insensitive exact match).
+
+        Args:
+            name: Merchant name
+
+        Returns:
+            Merchant dictionary or None if not found
+        """
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT merchant_id, name, city, country, address, logo_description
+                    FROM merchant
+                    WHERE LOWER(name) = LOWER(%s)
+                    LIMIT 1;
+                    """,
+                    (name,)
+                )
+                result = cursor.fetchone()
+
+                if result:
+                    return {
+                        'merchant_id': result[0],
+                        'name': result[1],
+                        'city': result[2],
+                        'country': result[3],
+                        'address': result[4],
+                        'logo_description': result[5]
+                    }
+                return None
+        except psycopg2.Error as e:
+            logger.error(f"Failed to find merchant by name: {e}")
+            raise
+
+    def create_merchant(self, name: str, city: str = None, country: str = None,
+                       address: str = None, logo_description: str = None) -> int | None:
+        """
+        Create a new merchant (no deduplication).
+
+        Args:
+            name: Merchant name
+            city: City (optional)
+            country: Country (optional)
+            address: Full address (optional)
+            logo_description: Logo description (optional)
+
+        Returns:
+            merchant_id if successful, None otherwise
+        """
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO merchant (name, city, country, address, logo_description)
+                    VALUES (%s, %s, %s, %s, %s)
+                    RETURNING merchant_id;
+                    """,
+                    (name, city, country, address, logo_description)
+                )
+                merchant_id = cursor.fetchone()[0]
+                self.connection.commit()
+                logger.info(f"New merchant '{name}' created with ID: {merchant_id}")
+                return merchant_id
+        except psycopg2.Error as e:
+            self.connection.rollback()
+            logger.error(f"Failed to create merchant: {e}")
+            raise
