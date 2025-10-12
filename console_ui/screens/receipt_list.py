@@ -49,7 +49,7 @@ class ReceiptListScreen(Screen):
         self.db = db
         self.user_id = user_id
         self.receipts = []
-        self.show_deleted = True  # Show deleted receipts by default
+        self.show_deleted = False  # Hide deleted receipts by default
         # Sorting state
         self.sort_columns = ["date", "merchant", "total_receipt", "status"]
         self.sort_column_idx = 0  # Start with date
