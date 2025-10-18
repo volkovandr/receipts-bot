@@ -35,6 +35,10 @@ class Config:
         self.anthropic_model = self.config.get('anthropic', 'model', fallback='claude-sonnet-4-5-20250929')
         self.anthropic_enable_prompt_caching = self.config.getboolean('anthropic', 'enable_prompt_caching', fallback=False)
 
+        # Prometheus configuration
+        self.prometheus_enabled = self.config.getboolean('prometheus', 'enabled', fallback=False)
+        self.prometheus_port = self.config.getint('prometheus', 'port', fallback=8000)
+
     def _parse_allowed_user_ids(self) -> Set[int]:
         """Parse allowed user IDs from config."""
         allowed_ids_str = self.config.get('telegram', 'allowed_user_ids', fallback='')

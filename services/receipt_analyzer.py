@@ -3,6 +3,7 @@ Receipt analysis service using Claude AI.
 """
 import logging
 from services.receipt_formatter import format_receipt_summary
+from services.metrics_service import MetricsService
 
 logger = logging.getLogger(__name__)
 
@@ -125,6 +126,30 @@ async def analyze_receipt_with_claude(context, db, receipt_id, image_id, image_p
 
         # Get user ID for authorization
         user_id = status_message.chat.id
+
+        # Record receipt and item metrics
+        final_status = 'completed/inconsistent' if not is_consistent else 'completed'
+        currency = transaction_data.get('currency', 'EUR')
+
+        # Record receipt metrics
+        if receipt_total is not None:
+            MetricsService.record_receipt(
+                status=final_status,
+                user_id=user_id,
+                value=float(receipt_total),
+                currency=currency
+            )
+
+        # Record item metrics
+        for item in items:
+            item_category = item.get('category', 'Uncategorized')
+            item_total = item.get('total', 0.0)
+            MetricsService.record_item(
+                category=item_category,
+                user_id=user_id,
+                value=float(item_total),
+                currency=currency
+            )
 
         # Format receipt summary using the formatter
         try:

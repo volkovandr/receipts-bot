@@ -9,6 +9,7 @@ import json
 import logging
 from pathlib import Path
 from typing import Dict, Any, Optional, List
+from services.metrics_service import MetricsService
 
 logger = logging.getLogger(__name__)
 
@@ -102,18 +103,19 @@ class ClaudeService:
                 })
                 logger.info(f"Added user notes to prompt: {user_notes[:50]}...")
 
-            # Call Claude API with vision
-            response = self.client.messages.create(
-                model=self.model,
-                max_tokens=4096,
-                system=[system_message],
-                messages=[
-                    {
-                        "role": "user",
-                        "content": messages_content,
-                    }
-                ],
-            )
+            # Call Claude API with vision (track timing)
+            with MetricsService.claude_api_duration.time():
+                response = self.client.messages.create(
+                    model=self.model,
+                    max_tokens=4096,
+                    system=[system_message],
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": messages_content,
+                        }
+                    ],
+                )
 
             # Extract text response
             if not response.content or len(response.content) == 0:
@@ -156,14 +158,22 @@ class ClaudeService:
             # Extract token usage
             input_tokens = response.usage.input_tokens
             output_tokens = response.usage.output_tokens
+            cache_creation = getattr(response.usage, 'cache_creation_input_tokens', 0)
+            cache_read = getattr(response.usage, 'cache_read_input_tokens', 0)
+
+            # Record metrics
+            MetricsService.record_tokens(
+                model=self.model,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cache_read_tokens=cache_read,
+                cache_creation_tokens=cache_creation
+            )
 
             # Log cache statistics if caching is enabled
             cache_info = ""
-            if self.enable_prompt_caching and hasattr(response.usage, 'cache_creation_input_tokens'):
-                cache_creation = getattr(response.usage, 'cache_creation_input_tokens', 0)
-                cache_read = getattr(response.usage, 'cache_read_input_tokens', 0)
-                if cache_creation > 0 or cache_read > 0:
-                    cache_info = f", cache: {cache_creation} created / {cache_read} read"
+            if self.enable_prompt_caching and (cache_creation > 0 or cache_read > 0):
+                cache_info = f", cache: {cache_creation} created / {cache_read} read"
 
             logger.info(f"Receipt analysis successful, status: {receipt_data.get('extraction_status', 'unknown')}, "
                        f"tokens: {input_tokens} in / {output_tokens} out{cache_info}")

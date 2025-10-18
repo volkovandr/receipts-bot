@@ -12,6 +12,7 @@ from config import Config
 from database import Database
 from services.image_processor import ImageProcessor
 from services.claude_service import ClaudeService
+from services.metrics_service import MetricsService
 from handlers.commands import start, hello, receipts
 from handlers.images import handle_photo, handle_document
 from handlers.callbacks import (
@@ -54,6 +55,15 @@ def main() -> None:
     # Validate configuration
     if not config.validate():
         return
+
+    # Initialize Prometheus metrics
+    if config.prometheus_enabled:
+        try:
+            MetricsService.initialize(port=config.prometheus_port)
+            logger.info(f"Prometheus metrics enabled on port {config.prometheus_port}")
+        except Exception as e:
+            logger.error(f"Failed to initialize Prometheus metrics: {e}")
+            logger.warning("Continuing without metrics...")
 
     # Initialize database
     db = Database(config.db_host, config.db_port, config.db_name, config.db_user, config.db_password)
