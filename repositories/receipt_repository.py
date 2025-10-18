@@ -22,7 +22,7 @@ class ReceiptRepository:
         self.connection = connection
         self.category_repository = category_repository
 
-    def insert_receipt(self, image_id: int, user_id: int, status: str = 'created') -> int:
+    def insert_receipt(self, image_id: int, user_id: int, status: str = 'created', user_notes: str = None) -> int:
         """
         Insert receipt record into database.
 
@@ -30,6 +30,7 @@ class ReceiptRepository:
             image_id: ID of the associated image
             user_id: Telegram user ID
             status: Processing status (default: 'created')
+            user_notes: Optional user-provided notes from caption
 
         Returns:
             receipt_id: The ID of the inserted receipt record
@@ -41,15 +42,18 @@ class ReceiptRepository:
             with self.connection.cursor() as cursor:
                 cursor.execute(
                     """
-                    INSERT INTO receipt (image_id, user_id, processing_status)
-                    VALUES (%s, %s, %s)
+                    INSERT INTO receipt (image_id, user_id, processing_status, user_notes)
+                    VALUES (%s, %s, %s, %s)
                     RETURNING receipt_id;
                     """,
-                    (image_id, user_id, status)
+                    (image_id, user_id, status, user_notes)
                 )
                 receipt_id = cursor.fetchone()[0]
                 self.connection.commit()
-                logger.info(f"Receipt record inserted with ID: {receipt_id}")
+                if user_notes:
+                    logger.info(f"Receipt record inserted with ID: {receipt_id} (with user notes)")
+                else:
+                    logger.info(f"Receipt record inserted with ID: {receipt_id}")
                 return receipt_id
         except psycopg2.Error as e:
             self.connection.rollback()
@@ -1279,4 +1283,41 @@ class ReceiptRepository:
 
         except psycopg2.Error as e:
             logger.error(f"Failed to get receipt transaction_id: {e}")
+            raise
+
+    def get_user_notes_by_receipt_id(self, receipt_id: int) -> str | None:
+        """
+        Get user notes for a receipt.
+
+        Args:
+            receipt_id: Receipt ID
+
+        Returns:
+            User notes string, or None if no notes or receipt not found
+        """
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT user_notes
+                    FROM receipt
+                    WHERE receipt_id = %s;
+                    """,
+                    (receipt_id,)
+                )
+                result = cursor.fetchone()
+
+                if result:
+                    user_notes = result[0]
+                    if user_notes:
+                        logger.debug(f"Retrieved user notes for receipt {receipt_id}: {user_notes[:50]}...")
+                    return user_notes
+                else:
+                    logger.warning(f"Receipt {receipt_id} not found")
+                    return None
+        except psycopg2.Error as e:
+            logger.error(f"Failed to get user notes: {e}")
             raise

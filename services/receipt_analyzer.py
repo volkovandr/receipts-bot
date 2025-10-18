@@ -41,9 +41,18 @@ async def analyze_receipt_with_claude(context, db, receipt_id, image_id, image_p
         category_notes = db.get_categories_with_notes()
         logger.info(f"Loaded {len(category_notes)} category notes for analysis")
 
+        # Get merchant notes from database
+        merchant_notes = db.get_merchants_with_notes()
+        logger.info(f"Loaded {len(merchant_notes)} merchant notes for analysis")
+
+        # Get user notes from receipt
+        user_notes = db.get_user_notes_by_receipt_id(receipt_id)
+        if user_notes:
+            logger.info(f"User notes found for receipt {receipt_id}: {user_notes[:100]}...")
+
         # Analyze receipt with Claude
         receipt_data, input_tokens, output_tokens = claude_service.analyze_receipt(
-            image_path, categories, category_notes
+            image_path, categories, category_notes, merchant_notes, user_notes
         )
 
         # Extract data from response

@@ -89,7 +89,25 @@ This is a Telegram bot for processing receipt images and financial documents. Th
   - Stores image metadata in database (file_id, path, size, mime_type)
   - Creates receipt record with status 'created' when image is received
   - Links receipt to image and user
+  - **User notes**: Extracts caption from photo/document message as user-provided notes
   - **Requires**: `poppler-utils` system package for PDF conversion (`sudo apt install poppler-utils`)
+- ✅ **User-Provided Notes** (`schema.sql`, `handlers/images.py`, `handlers/messages.py`, `services/claude_service.py`, `services/receipt_analyzer.py`)
+  - Users can add optional text notes when sending receipt images
+  - **Two methods**:
+    1. **Caption method**: Add caption to photo/document in Telegram
+    2. **Preceding message method**: Send text message, then share image from external app (within 10 seconds)
+  - Caption is stored in `receipt.user_notes` field in database
+  - Notes are passed to Claude AI to guide analysis
+  - **Use cases**:
+    - Override category detection: "mark everything as Food"
+    - Clarify unclear items: "the coffee was for a business meeting"
+    - Add context: "this receipt has items for two different projects"
+  - Notes appear as "USER NOTE:" prefix in Claude prompt
+  - Helps Claude make better decisions about categorization and extraction
+  - **Technical details**:
+    - Text messages stored temporarily in `context.user_data` with timestamp
+    - 10-second window for matching text with subsequent image
+    - Automatic cleanup of old pending notes
 - ✅ **Image pre-processing** (`services/image_processor.py`)
   - **Grayscale conversion** - Converts to grayscale first for optimal processing
   - **Smart cropping** - Skip cropping for PDFs (already scanned), apply to photos
@@ -411,6 +429,7 @@ The database uses schema `app_receipts_bot` with the following entities:
    - Status 'pre-processed' is set when image is prepared for AI analysis
    - Status 'completed' is set after successful AI analysis with matching totals
    - Status 'completed/inconsistent' is set when receipt total doesn't match items sum
+   - **user_notes** field: Optional user-provided notes from image caption
    - **Soft delete**: `is_deleted` boolean field (default: FALSE)
 
 8. **receipt_item** - Individual line items from receipts
@@ -448,18 +467,20 @@ The bot uses Claude's vision capabilities to analyze receipt images. The prompt 
 - **Fallback**: Original images used if pre-processing fails
 
 ### Processing Flow
-1. User uploads receipt image
-2. Image pre-processed (cropped, grayscale, resized)
-3. Categories and category notes fetched from database
-4. Prompt prepared with categories list and category-specific notes injected
-5. Claude analyzes with vision API (model configurable)
-6. Response parsed and validated (handles markdown code blocks)
-7. Data saved to database:
+1. User uploads receipt image (optionally with caption as user notes)
+2. Image metadata and user notes saved to database
+3. Image pre-processed (cropped, grayscale, resized)
+4. Categories, category notes, merchant notes, and user notes fetched from database
+5. Prompt prepared with categories list and all notes injected
+6. Claude analyzes with vision API (model configurable)
+   - User notes passed as additional context with "USER NOTE:" prefix
+7. Response parsed and validated (handles markdown code blocks)
+8. Data saved to database:
    - AI analysis record (with tokens)
    - Merchant record (normalized)
    - Transaction record (financial details)
    - Receipt items (with category assignments)
-8. User receives summary with warnings for uncertain fields
+9. User receives summary with warnings for uncertain fields
 
 ## Next Steps
 

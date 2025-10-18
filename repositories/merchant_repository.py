@@ -352,3 +352,31 @@ class MerchantRepository:
             self.connection.rollback()
             logger.error(f"Failed to create merchant: {e}")
             raise
+
+    def get_merchants_with_notes(self) -> list[tuple[str, str, str, str]]:
+        """
+        Get merchants that have AI notes defined.
+
+        Returns:
+            List of tuples (name, address, city, ai_notes) where ai_notes is not NULL
+            Ordered by merchant name
+        """
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT name, address, city, ai_notes
+                    FROM merchant
+                    WHERE ai_notes IS NOT NULL
+                    ORDER BY name;
+                    """
+                )
+                merchant_notes = cursor.fetchall()
+                logger.debug(f"Retrieved {len(merchant_notes)} merchants with AI notes from database")
+                return merchant_notes
+        except psycopg2.Error as e:
+            logger.error(f"Failed to retrieve merchants with notes: {e}")
+            raise

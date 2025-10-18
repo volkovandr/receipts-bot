@@ -88,6 +88,9 @@ CATEGORIES DICTIONARY:
 CATEGORY-SPECIFIC NOTES:
 >> category notes <<
 
+MERCHANT-SPECIFIC NOTES:
+>> merchant notes <<
+
 OUTPUT FORMAT:
 """"
 {

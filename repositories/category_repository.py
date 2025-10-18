@@ -23,6 +23,7 @@ class CategoryRepository:
     def get_all_categories(self) -> list:
         """
         Get all category names from database.
+        Categories with AI notes are returned first, then alphabetically.
 
         Returns:
             List of category names (strings)
@@ -32,7 +33,15 @@ class CategoryRepository:
 
         try:
             with self.connection.cursor() as cursor:
-                cursor.execute("SELECT category_name FROM category ORDER BY category_name;")
+                cursor.execute(
+                    """
+                    SELECT category_name
+                    FROM category
+                    ORDER BY
+                        ai_notes IS NULL,
+                        category_name;
+                    """
+                )
                 categories = [row[0] for row in cursor.fetchall()]
                 logger.debug(f"Retrieved {len(categories)} categories from database")
                 return categories

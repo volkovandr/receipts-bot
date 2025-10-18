@@ -34,6 +34,7 @@ CREATE TABLE merchant (
     country TEXT,
     address TEXT,
     logo_description TEXT,
+    ai_notes TEXT,  -- Additional instructions for Claude AI about merchant recognition
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
@@ -88,6 +89,7 @@ CREATE TABLE receipt (
     transaction_id INTEGER REFERENCES transaction(transaction_id) ON DELETE SET NULL,
     ai_analysis_id INTEGER REFERENCES ai_analysis(analysis_id) ON DELETE SET NULL,
     processing_status TEXT DEFAULT 'pending',  -- created, pre-processed, analyzing, completed, failed
+    user_notes TEXT,  -- Optional user-provided notes to help Claude AI (from caption)
     is_deleted BOOLEAN DEFAULT FALSE,  -- soft delete flag
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP

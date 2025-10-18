@@ -131,6 +131,10 @@ class Database:
         """Create a new merchant."""
         return self.merchant_repo.create_merchant(name, city, country, address, logo_description)
 
+    def get_merchants_with_notes(self) -> list[tuple[str, str, str, str]]:
+        """Get merchants that have AI notes defined."""
+        return self.merchant_repo.get_merchants_with_notes()
+
     # Transaction operations
     def insert_transaction(self, date: str = None, time: str = None, currency: str = 'EUR',
                           net_amount: float = None, vat_amount: float = None,
@@ -159,9 +163,9 @@ class Database:
         )
 
     # Receipt operations
-    def insert_receipt(self, image_id: int, user_id: int, status: str = 'created') -> int:
+    def insert_receipt(self, image_id: int, user_id: int, status: str = 'created', user_notes: str = None) -> int:
         """Insert receipt record."""
-        return self.receipt_repo.insert_receipt(image_id, user_id, status)
+        return self.receipt_repo.insert_receipt(image_id, user_id, status, user_notes)
 
     def update_receipt_status(self, receipt_id: int, status: str) -> None:
         """Update receipt processing status."""
@@ -294,3 +298,7 @@ class Database:
 
         # Update transaction total
         return self.transaction_repo.update_transaction_total(transaction_id, brutto_amount)
+
+    def get_user_notes_by_receipt_id(self, receipt_id: int) -> str | None:
+        """Get user notes for a receipt."""
+        return self.receipt_repo.get_user_notes_by_receipt_id(receipt_id)

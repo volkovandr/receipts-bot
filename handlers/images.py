@@ -78,6 +78,28 @@ async def process_image(update: Update, context: ContextTypes.DEFAULT_TYPE, is_d
         is_document: True if image was sent as document, False if sent as photo
     """
     try:
+        # Extract caption (user notes) from message
+        user_notes = update.message.caption if update.message.caption else None
+
+        # If no caption, check for recent text message (external app sharing scenario)
+        if not user_notes:
+            import time
+            pending_note = context.user_data.get('pending_user_note')
+            if pending_note:
+                # Check if the text message was sent within last 10 seconds
+                time_diff = time.time() - pending_note['timestamp']
+                if time_diff <= 10:
+                    user_notes = pending_note['text']
+                    logger.info(f"Using preceding text message as user notes (sent {time_diff:.1f}s before image)")
+                    # Clear the pending note
+                    context.user_data.pop('pending_user_note', None)
+                else:
+                    logger.debug(f"Ignoring old text message (sent {time_diff:.1f}s ago)")
+                    context.user_data.pop('pending_user_note', None)
+
+        if user_notes:
+            logger.info(f"User provided notes: {user_notes[:100]}...")
+
         # Get the file object
         if is_document:
             file = await update.message.document.get_file()
@@ -138,11 +160,12 @@ async def process_image(update: Update, context: ContextTypes.DEFAULT_TYPE, is_d
             mime_type=mime_type
         )
 
-        # Create receipt record with status 'created'
+        # Create receipt record with status 'created' and user notes
         receipt_id = db.insert_receipt(
             image_id=image_id,
             user_id=user_id,
-            status='created'
+            status='created',
+            user_notes=user_notes
         )
 
         logger.info(f"Receipt {receipt_id} created for image {image_id}")
