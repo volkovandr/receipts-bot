@@ -4,6 +4,7 @@ Receipt analysis service using Claude AI.
 import logging
 from services.receipt_formatter import format_receipt_summary
 from services.metrics_service import MetricsService
+from services.receipt_validator import validate_and_enrich_items
 
 logger = logging.getLogger(__name__)
 
@@ -60,11 +61,12 @@ async def analyze_receipt_with_claude(context, db, receipt_id, image_id, image_p
         extraction_status = receipt_data.get('extraction_status', 'unknown')
         merchant_data = receipt_data.get('merchant', {})
         transaction_data = receipt_data.get('transaction', {})
-        items = receipt_data.get('items', [])
+        items_raw = receipt_data.get('items', [])
+        categories_data = receipt_data.get('categories', [])
         uncertain_fields = receipt_data.get('uncertain_fields', [])
         need_clarification = receipt_data.get('need_clarification', [])
 
-        # Insert AI analysis record
+        # Insert AI analysis record BEFORE validation (to preserve original Claude response)
         ai_analysis_id = db.insert_ai_analysis(
             model_name=context.bot_data['claude_service'].model,
             extraction_status=extraction_status,
@@ -72,6 +74,44 @@ async def analyze_receipt_with_claude(context, db, receipt_id, image_id, image_p
             output_tokens=output_tokens,
             raw_data=receipt_data
         )
+
+        # Validate and enrich items with categories
+        # NOTE: This modifies items in-place, so we do it AFTER storing raw_data
+        try:
+            config = context.bot_data.get('config')
+            default_category = config.default_category if config else 'Uncategorized'
+
+            items = validate_and_enrich_items(
+                items=items_raw,
+                categories_data=categories_data,
+                default_category=default_category
+            )
+            logger.info(f"Successfully validated and enriched {len(items)} items")
+        except ValueError as e:
+            # Validation failed - mark receipt as failed
+            logger.error(f"Item validation failed for receipt {receipt_id}: {e}")
+
+            # Update AI analysis record with error
+            db.update_ai_analysis_error(ai_analysis_id, f"Validation error: {str(e)}")
+
+            # Update receipt with failed analysis
+            db.update_receipt_with_analysis(
+                receipt_id=receipt_id,
+                merchant_id=None,
+                transaction_id=None,
+                ai_analysis_id=ai_analysis_id
+            )
+
+            # Update receipt status to 'failed'
+            db.update_receipt_status(receipt_id, 'failed')
+
+            await status_message.edit_text(
+                '❌ Analysis failed!\n\n'
+                'There was a problem with the AI response:\n'
+                f'{str(e)}\n\n'
+                'The image has been saved. Please try again or contact support.'
+            )
+            return
 
         # Insert merchant
         merchant_id = db.insert_or_get_merchant(
@@ -143,7 +183,7 @@ async def analyze_receipt_with_claude(context, db, receipt_id, image_id, image_p
         # Record item metrics
         for item in items:
             item_category = item.get('category', 'Uncategorized')
-            item_total = item.get('total', 0.0)
+            item_total = item.get('total_price', 0.0)
             MetricsService.record_item(
                 category=item_category,
                 user_id=user_id,

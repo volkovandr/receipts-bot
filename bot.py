@@ -97,10 +97,11 @@ def main() -> None:
     # Create the Application
     application = Application.builder().token(config.telegram_bot_token).build()
 
-    # Store database, image processor, and claude service in bot_data for handlers to access
+    # Store database, image processor, claude service, and config in bot_data for handlers to access
     application.bot_data['database'] = db
     application.bot_data['image_processor'] = image_processor
     application.bot_data['claude_service'] = claude_service
+    application.bot_data['config'] = config
 
     # Wrap handlers with authorization decorator
     authorized_start = authorized_only(start)

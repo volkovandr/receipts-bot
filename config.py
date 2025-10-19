@@ -39,6 +39,9 @@ class Config:
         self.prometheus_enabled = self.config.getboolean('prometheus', 'enabled', fallback=False)
         self.prometheus_port = self.config.getint('prometheus', 'port', fallback=8000)
 
+        # Receipt processing configuration
+        self.default_category = self.config.get('receipt_processing', 'default_category', fallback='Uncategorized')
+
     def _parse_allowed_user_ids(self) -> Set[int]:
         """Parse allowed user IDs from config."""
         allowed_ids_str = self.config.get('telegram', 'allowed_user_ids', fallback='')

@@ -162,6 +162,10 @@ class Database:
             model_name, extraction_status, input_tokens, output_tokens, raw_data, error_message
         )
 
+    def update_ai_analysis_error(self, analysis_id: int, error_message: str) -> None:
+        """Update AI analysis record with error message."""
+        return self.ai_analysis_repo.update_ai_analysis_error(analysis_id, error_message)
+
     # Receipt operations
     def insert_receipt(self, image_id: int, user_id: int, status: str = 'created', user_notes: str = None) -> int:
         """Insert receipt record."""

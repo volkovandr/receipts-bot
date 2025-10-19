@@ -6,7 +6,7 @@ You are analyzing a receipt image. Your task is to
 Extract:
 - Store name, logo, and any visible address/location information
 - Date and time of transaction
-- All items with their descriptions, article numbers, quantities, and prices
+- All items with their descriptions, quantities, and prices
 - Tax codes and indicators (like "MwSt", "VAT", "SDB", etc.)
 - All totals, subtotals, taxes, and discounts
 - Payment information (card numbers, IBAN, payment type, cash, etc.)
@@ -53,17 +53,20 @@ ANALYSIS INSTRUCTIONS:
 3. ITEMS EXTRACTION:
    For each item:
    - Extract the item name/description in its original language (do not translate)
-   - Determine quantity (if not visible, default to 1)
-   - Extract unit price (price per single item)
-   - Extract total price for that line (quantity × unit price)
-   - Include article/product/SKU numbers if present
+   - Extract total price for that line
+   - **ONLY include quantity and unit_price when quantity is greater than 1**
+   - When quantity = 1: omit both quantity and unit_price fields (total_price is sufficient)
+   - When quantity > 1: include both quantity and unit_price fields
    - Assign the MOST APPROPRIATE category from the provided categories dictionary
 
 4. CATEGORY ASSIGNMENT RULES:
+   - Use 0-based indices to assign items to categories (see output format below)
    - Match items to categories based on item type and purpose
    - When confidence in category assignment is below 80%, consider them as needed clarification
    - Category might be deducted from the shop itself when unclear for an individual item
    - **IMPORTANT**: If category-specific notes are provided below, prioritize them over general categorization logic
+   - Items can appear in only ONE category
+   - Items not assigned to any category will be automatically categorized as "Uncategorized"
 
 5. TOTALS CALCULATION:
    - Subtotal: sum before tax (Netto)
@@ -115,12 +118,15 @@ OUTPUT FORMAT:
     "items": [
         {
             "name": "string: just like in receipt",
-            "quantity": 123.45,
-            "unit_price": 123.45,
-            "total_price": 123.45,
-            "category": "string: one from the dictionary",
-            "suggested_category": "string: if certain, but none of the dictionary fits, otherwise null",
-            "article_number": "string: just like in receipt"
+            "quantity": 123.45,  // OPTIONAL: only when > 1
+            "unit_price": 123.45,  // OPTIONAL: only when quantity > 1
+            "total_price": 123.45
+        }
+    ],
+    "categories": [
+        {
+            "name": "string: one from the dictionary",
+            "items": [0, 1, 2]  // array of 0-based indices into items array
         }
     ],
     "uncertain_fields": ["string"],
@@ -134,6 +140,10 @@ CRITICAL RULES:
 - All monetary values must be numbers, not strings
 - Keep item names in original language
 - Set extraction_status to: "complete", "partial", or "needs_review" or "failed"
-- List specific field names in uncertain_fields (e.g., ["store.city", "items.2.category"])
+- List specific field names in uncertain_fields (e.g., ["merchant.city", "items.2.name"])
 - List specific items needing user clarification in need_clarification with reason
+- Use 0-based indices in the categories.items arrays to reference items
+- Each item index can appear in ONLY ONE category
+- Do NOT include category field in individual items - use the categories array instead
+- Only include quantity and unit_price fields when quantity is greater than 1
 
