@@ -87,7 +87,7 @@ class Database:
         """Get category ID by name."""
         return self.category_repo.get_category_id_by_name(category_name)
 
-    def get_categories_with_notes(self) -> list[tuple[str, str]]:
+    def get_categories_with_notes(self) -> list[tuple[int, str, str]]:
         """Get categories that have AI notes defined."""
         return self.category_repo.get_categories_with_notes()
 

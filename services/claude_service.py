@@ -37,8 +37,8 @@ class ClaudeService:
     def analyze_receipt(
         self,
         image_path: str,
-        categories: List[str],
-        category_notes: Optional[List[tuple[str, str]]] = None,
+        categories: List[tuple[int, str]],
+        category_notes: Optional[List[tuple[int, str, str]]] = None,
         merchant_notes: Optional[List[tuple[str, str, str, str]]] = None,
         user_notes: Optional[str] = None
     ) -> tuple[Dict[str, Any], int, int]:
@@ -47,8 +47,8 @@ class ClaudeService:
 
         Args:
             image_path: Path to the receipt image file
-            categories: List of category names from database
-            category_notes: Optional list of (category_name, ai_notes) tuples
+            categories: List of (category_id, category_name) tuples from database
+            category_notes: Optional list of (category_id, category_name, ai_notes) tuples
             merchant_notes: Optional list of (name, address, city, ai_notes) tuples
             user_notes: Optional user-provided notes from image caption
 
@@ -196,8 +196,8 @@ class ClaudeService:
     def _prepare_prompt(
         self,
         template_path: str,
-        categories: List[str],
-        category_notes: Optional[List[tuple[str, str]]] = None,
+        categories: List[tuple[int, str]],
+        category_notes: Optional[List[tuple[int, str, str]]] = None,
         merchant_notes: Optional[List[tuple[str, str, str, str]]] = None
     ) -> str:
         """
@@ -205,8 +205,8 @@ class ClaudeService:
 
         Args:
             template_path: Path to prompt template file
-            categories: List of category names
-            category_notes: Optional list of (category_name, ai_notes) tuples
+            categories: List of (category_id, category_name) tuples
+            category_notes: Optional list of (category_id, category_name, ai_notes) tuples
             merchant_notes: Optional list of (name, address, city, ai_notes) tuples
 
         Returns:
@@ -219,20 +219,20 @@ class ClaudeService:
         with open(template_file, 'r', encoding='utf-8') as f:
             template = f.read()
 
-        # Format categories as bullet list
-        categories_text = "\n".join(f"- {cat}" for cat in categories)
+        # Format categories as bullet list with IDs
+        categories_text = "\n".join(f"- [{cat_id}] {cat_name}" for cat_id, cat_name in categories)
 
         # Replace placeholder with actual categories
         prompt = template.replace(">> list of categories <<", categories_text)
 
         # Format category notes
         if category_notes and len(category_notes) > 0:
-            notes_text = "The following categories have special assignment rules. When you encounter items matching these descriptions, prioritize these notes over general categorization logic:\n\n"
-            for category_name, ai_note in category_notes:
-                notes_text += f"- {category_name}\n  Note: {ai_note}\n\n"
+            notes_text = "The following category-specific guidelines, prefer these rules over default assignment logic:\n"
+            for category_id, category_name, ai_note in category_notes:
+                notes_text += f"- [{category_id}] {category_name} - Note: {ai_note}\n"
             logger.debug(f"Added {len(category_notes)} category notes to prompt")
         else:
-            notes_text = "No special category assignment rules defined."
+            notes_text = ""
             logger.debug("No category notes to add to prompt")
 
         # Replace placeholder with category notes
@@ -240,14 +240,12 @@ class ClaudeService:
 
         # Format merchant notes
         if merchant_notes and len(merchant_notes) > 0:
-            merchant_text = "The following merchants have special recognition or categorization rules:\n\n"
+            merchant_text = "The following merchants have special recognition or categorization rules:\n"
             for name, address, city, ai_note in merchant_notes:
                 merchant_text += f"- {name}"
                 if city:
                     merchant_text += f", {city}"
-                if address:
-                    merchant_text += f"\n  Address: {address}"
-                merchant_text += f"\n  Note: {ai_note}\n\n"
+                merchant_text += f" - Note: {ai_note}\n\n"
             logger.debug(f"Added {len(merchant_notes)} merchant notes to prompt")
         else:
             merchant_text = "No special merchant recognition rules defined."

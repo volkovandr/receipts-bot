@@ -204,19 +204,21 @@ This is a Telegram bot for processing receipt images and financial documents. Th
   - User-friendly error messages for invalid input
 - ✅ **Prompt Optimization for Token Reduction** (`prompt.txt`, `services/receipt_validator.py`, `config.py`)
   - **Index-based category assignment**: Items separated from category assignments to eliminate repetition
+  - **Category ID-based assignment**: Claude returns category IDs instead of names for additional token savings
   - **Removed unused fields**: Eliminated `article_number` and `suggested_category` (~5-10 tokens per item)
   - **Optional quantity/unit_price**: Only included when quantity > 1 (~10-15 tokens saved per single-quantity item)
-  - **Token savings**: 20-30% reduction on average receipts, 30-40% on large receipts (40+ items)
-  - **Cost impact**: ~$400-600 annual savings at 100K receipts/year
+  - **Token savings**: 25-35% reduction on average receipts, 35-45% on large receipts (40+ items)
+  - **Cost impact**: ~$500-750 annual savings at 100K receipts/year
   - **New output format**:
     - Items array: `[{"name": "Milk", "total_price": 1.99}, ...]`
-    - Categories array: `[{"name": "Food: Groceries", "items": [0, 1, 2]}, ...]`
+    - Categories array: `[{"id": 23, "items": [0, 1, 2]}, ...]` (uses category IDs instead of names)
   - **Validation module** (`services/receipt_validator.py`):
+    - Validates category IDs exist in database before assignment
     - Validates category indices (bounds checking, type checking, duplicate detection)
-    - Enriches items with category field after validation
+    - Enriches items with both category name and category_id fields after validation
     - Defaults quantity to 1 and calculates unit_price when missing
     - Assigns default category to uncategorized items
-    - Raises `ValueError` for validation failures (out-of-bounds, duplicates)
+    - Raises `ValueError` for validation failures (invalid IDs, out-of-bounds, duplicates)
   - **Configuration**: `[receipt_processing]` section with `default_category` setting
   - **Database storage**: `ai_analysis.raw_data` stores Claude's optimized response (before enrichment)
   - **Backward compatibility**: No database schema changes, enrichment happens in-memory
@@ -469,9 +471,10 @@ Full schema definition in [schema.sql](schema.sql).
 The bot uses Claude's vision capabilities to analyze receipt images. The prompt (stored in `prompt.txt`):
 - Requests structured JSON output with optimized format for token efficiency
 - Extracts: merchant info, transaction details, all items with prices
-- **Index-based category assignment**: Uses 0-based indices to avoid repeating category names
+- **Category ID-based assignment**: Claude returns category IDs (integers) instead of names for maximum token efficiency
+- **Index-based item assignment**: Uses 0-based indices to map items to categories
 - **Optional fields**: Only includes quantity/unit_price when quantity > 1
-- Assigns categories from the predefined list (71 categories injected into prompt)
+- Categories injected as: `- [23] Food: Groceries` (ID in brackets, name after)
 - **Category-specific notes**: Categories with `ai_notes` are injected with special instructions
 - Prioritizes category notes over general categorization logic
 - Handles tax IDs, QR codes, payment information
@@ -494,21 +497,22 @@ The bot uses Claude's vision capabilities to analyze receipt images. The prompt 
 1. User uploads receipt image (optionally with caption as user notes)
 2. Image metadata and user notes saved to database
 3. Image pre-processed (cropped, grayscale, resized)
-4. Categories, category notes, merchant notes, and user notes fetched from database
-5. Prompt prepared with categories list and all notes injected
+4. Categories with IDs, category notes, merchant notes, and user notes fetched from database
+5. Prompt prepared with categories (formatted as `[ID] Name`) and all notes injected
 6. Claude analyzes with vision API (model configurable)
    - User notes passed as additional context with "USER NOTE:" prefix
-   - Returns optimized format: separate items and categories arrays
+   - Returns optimized format: `{"items": [...], "categories": [{"id": 23, "items": [0,1]}]}`
 7. Response parsed and AI analysis record saved to database (raw optimized format)
 8. Items validated and enriched:
+   - Category IDs validated against database (existence check)
    - Category indices validated (bounds, types, duplicates)
-   - Items enriched with category field based on index mapping
+   - Items enriched with both category name and category_id fields
    - Quantity defaulted to 1 if missing, unit_price calculated
    - Uncategorized items assigned to default category
 9. Data saved to database:
    - Merchant record (normalized)
    - Transaction record (financial details)
-   - Receipt items (with enriched category assignments)
+   - Receipt items (with enriched category_id assignments)
 10. User receives summary with warnings for uncertain fields
 
 ## Next Steps

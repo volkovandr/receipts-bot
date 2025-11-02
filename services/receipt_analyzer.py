@@ -35,11 +35,11 @@ async def analyze_receipt_with_claude(context, db, receipt_id, image_id, image_p
         # Update receipt status to 'processing'
         db.update_receipt_status(receipt_id, 'processing')
 
-        # Get categories from database
-        categories = db.get_all_categories()
+        # Get categories with IDs from database
+        categories = db.get_all_categories_with_ids()
         logger.info(f"Loaded {len(categories)} categories for analysis")
 
-        # Get category notes from database
+        # Get category notes from database (now includes IDs)
         category_notes = db.get_categories_with_notes()
         logger.info(f"Loaded {len(category_notes)} category notes for analysis")
 
@@ -79,12 +79,23 @@ async def analyze_receipt_with_claude(context, db, receipt_id, image_id, image_p
         # NOTE: This modifies items in-place, so we do it AFTER storing raw_data
         try:
             config = context.bot_data.get('config')
-            default_category = config.default_category if config else 'Uncategorized'
+            default_category_name = config.default_category if config else 'Uncategorized'
+
+            # Build category lookup dict from database categories
+            categories_lookup = dict(categories)  # {category_id: category_name}
+
+            # Get default category ID
+            default_category_id = db.get_category_id_by_name(default_category_name)
+            if default_category_id is None:
+                logger.error(f"Default category '{default_category_name}' not found in database")
+                raise ValueError(f"Default category '{default_category_name}' not found in database")
 
             items = validate_and_enrich_items(
                 items=items_raw,
                 categories_data=categories_data,
-                default_category=default_category
+                categories_lookup=categories_lookup,
+                default_category_id=default_category_id,
+                default_category_name=default_category_name
             )
             logger.info(f"Successfully validated and enriched {len(items)} items")
         except ValueError as e:
