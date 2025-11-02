@@ -42,6 +42,12 @@ class Config:
         # Receipt processing configuration
         self.default_category = self.config.get('receipt_processing', 'default_category', fallback='Uncategorized')
 
+        # Skew detection configuration
+        self.skew_threshold = self.config.getfloat('skew_detection', 'threshold', fallback=1.0)
+        self.skew_min_contours = self.config.getint('skew_detection', 'min_contours', fallback=3)
+        self.skew_kernel_width = self.config.getint('skew_detection', 'kernel_width', fallback=50)
+        self.skew_kernel_height = self.config.getint('skew_detection', 'kernel_height', fallback=2)
+
     def _parse_allowed_user_ids(self) -> Set[int]:
         """Parse allowed user IDs from config."""
         allowed_ids_str = self.config.get('telegram', 'allowed_user_ids', fallback='')

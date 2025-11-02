@@ -125,6 +125,24 @@ This is a Telegram bot for processing receipt images and financial documents. Th
   - Updates receipt status to 'pre-processed' after successful processing
   - Robust error handling - falls back to original image if all strategies fail
   - **Performance**: 17-64% file size reduction depending on background type
+- ✅ **Skew Detection and Correction** (`services/skew_detector.py`, `services/deskew_service.py`, `handlers/images.py`, `handlers/callbacks.py`)
+  - **Automatic skew detection** - Analyzes images after pre-processing using Text Line Contours method
+  - **Regional analysis** - Splits images into regions to detect non-uniform skew (curved receipts)
+  - **Smart threshold** - Configurable threshold (default: 1.0°) to trigger user warning
+  - **User choice workflow** - When significant skew detected (> threshold):
+    - Shows warning with skew angle and affected region (upper/middle/lower/entire)
+    - Three options: "🔄 Deskew & Process", "▶️ Process As-Is", "🗑️ Discard & Rescan"
+  - **Shear transformation** - Corrects skew using vertical shear (preserves width, no expansion)
+  - **PDF vs Photo handling**:
+    - PDF source: Creates new processed file after deskewing
+    - Photo source: Replaces existing processed image in-place
+  - **Authorization checks** - All operations verify user ownership at SQL and application level
+  - **Configurable parameters** (`config.ini`):
+    - `threshold`: Skew angle threshold in degrees (default: 1.0)
+    - `min_contours`: Minimum text line contours for reliable detection (default: 3)
+    - `kernel_width/height`: Morphological kernel size for text line detection (50x2)
+  - **Performance**: Adds ~0.5-2 seconds to processing, deskewing is fast (< 0.1 seconds)
+  - **Seamless flow**: Minimal skew (≤ threshold) continues automatically to Claude analysis
 - ✅ **User management** (`handlers/commands.py`)
   - `/start` command inserts/updates user in database
   - Uses Telegram username or falls back to first name/full name
@@ -262,6 +280,8 @@ receipts-bot-2/
 ├── services/               # Business logic layer
 │   ├── claude_service.py     # Claude AI integration
 │   ├── image_processor.py    # Image pre-processing
+│   ├── skew_detector.py      # Skew detection using Text Line Contours method
+│   ├── deskew_service.py     # Deskewing using shear transformation
 │   ├── receipt_analyzer.py   # Receipt analysis orchestration
 │   ├── receipt_validator.py  # Receipt data validation & enrichment
 │   └── receipt_formatter.py  # Receipt summary formatting (reusable)

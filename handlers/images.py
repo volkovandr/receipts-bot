@@ -5,14 +5,56 @@ import logging
 import os
 from pathlib import Path
 from datetime import datetime
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from pdf2image import convert_from_path
+from services.skew_detector import get_region_position_name
 
 logger = logging.getLogger(__name__)
 
 # Image storage directory
 IMAGES_DIR = Path("images/orig")
+
+
+async def show_skew_warning(update: Update, status_message, skew_analysis: dict, receipt_id: int) -> None:
+    """
+    Show skew warning message with user choices.
+
+    Args:
+        update: Telegram update object
+        status_message: Status message to edit
+        skew_analysis: Skew analysis results from skew_detector
+        receipt_id: Receipt ID for callback handlers
+    """
+    max_skew = skew_analysis['max_skew_angle']
+    region_index = skew_analysis['max_skew_region']
+    num_regions = skew_analysis['num_regions']
+
+    # Get region position name
+    region_name = get_region_position_name(region_index, num_regions)
+
+    # Determine tilt direction
+    direction = "right" if max_skew > 0 else "left"
+
+    # Build warning message
+    warning_text = (
+        f"⚠️ SKEW DETECTED\n\n"
+        f"Significant skew detected in the {region_name} part of the image.\n\n"
+        f"Skew angle: {abs(max_skew):.2f}° (tilted to the {direction})\n"
+        f"This may cause incorrect alignment of items and prices during analysis.\n\n"
+        f"What would you like to do?"
+    )
+
+    # Create inline keyboard with options
+    keyboard = [
+        [InlineKeyboardButton("🔄 Deskew & Process", callback_data=f"deskew_proceed_{receipt_id}")],
+        [InlineKeyboardButton("▶️ Process As-Is", callback_data=f"proceed_skewed_{receipt_id}")],
+        [InlineKeyboardButton("🗑️ Discard & Rescan", callback_data=f"skew_discard_{receipt_id}")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await status_message.edit_text(warning_text, reply_markup=reply_markup)
+    logger.info(f"Skew warning shown for receipt {receipt_id}: {abs(max_skew):.2f}° in {region_name} region")
 
 
 def convert_pdf_to_image(pdf_path: str) -> str:
@@ -200,6 +242,42 @@ async def process_image(update: Update, context: ContextTypes.DEFAULT_TYPE, is_d
                 db.update_receipt_status(receipt_id, 'pre-processed')
 
                 logger.info(f"Image {image_id} processed successfully, receipt {receipt_id} status: pre-processed")
+
+                # SKEW DETECTION PHASE
+                # Analyze skew after preprocessing
+                from services import skew_detector
+                from config import Config
+
+                config = context.bot_data.get('config') or Config()
+
+                # Update user: analyzing skew
+                await status_message.edit_text(
+                    ('✅ PDF received!\n✅ Converted to image\n✅ Pre-processing complete!\n' if is_pdf else '✅ Image received!\n✅ Pre-processing complete!\n') +
+                    '🔍 Analyzing image skew...'
+                )
+
+                skew_analysis = skew_detector.analyze_image_skew(processed_path)
+                max_skew = abs(skew_analysis.get('max_skew_angle', 0.0))
+
+                logger.info(f"Skew analysis for receipt {receipt_id}: max_angle={max_skew:.2f}°")
+
+                # Check if skew exceeds threshold
+                if max_skew > config.skew_threshold:
+                    # Store analysis data for callback handlers
+                    context.user_data['pending_skew_analysis'] = {
+                        'receipt_id': receipt_id,
+                        'image_id': image_id,
+                        'processed_image_path': processed_path,
+                        'is_pdf_source': is_pdf,
+                        'skew_analysis': skew_analysis
+                    }
+
+                    # Show skew warning to user
+                    await show_skew_warning(update, status_message, skew_analysis, receipt_id)
+                    return  # Pause processing, wait for user decision
+
+                # Skew is minimal, continue with normal flow
+                logger.info(f"Skew {max_skew:.2f}° is below threshold {config.skew_threshold}°, continuing")
 
                 # Update user with success
                 if is_pdf:

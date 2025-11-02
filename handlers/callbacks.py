@@ -663,3 +663,177 @@ async def handle_cancel_edit_callback(update: Update, context: ContextTypes.DEFA
     )
 
     logger.info(f"User {query.from_user.id} cancelled editing")
+
+
+async def handle_deskew_proceed_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle callback when user chooses to deskew and process the image."""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    receipt_id = int(query.data.split('_')[-1])
+
+    logger.info(f"User {user_id} chose to deskew receipt {receipt_id}")
+
+    # Get database connection
+    db = context.bot_data.get('database')
+    if not db:
+        logger.error("Database connection not available")
+        await query.edit_message_text('❌ Database not available.')
+        return
+
+    # Verify receipt ownership
+    if not db.verify_receipt_owner(receipt_id, user_id):
+        await query.edit_message_text('❌ Receipt not found or access denied.')
+        logger.warning(f"Unauthorized access attempt: user {user_id} tried to deskew receipt {receipt_id}")
+        return
+
+    # Get pending skew analysis data
+    skew_data = context.user_data.get('pending_skew_analysis')
+    if not skew_data or skew_data['receipt_id'] != receipt_id:
+        await query.edit_message_text('❌ Skew analysis data not found. Please try uploading the image again.')
+        logger.error(f"Skew data not found for receipt {receipt_id}")
+        return
+
+    processed_image_path = skew_data['processed_image_path']
+    is_pdf_source = skew_data['is_pdf_source']
+    skew_analysis = skew_data['skew_analysis']
+    image_id = skew_data['image_id']
+    angle = skew_analysis['max_skew_angle']
+
+    # Update user: deskewing in progress
+    await query.edit_message_text('🔄 Deskewing image...')
+
+    # Import deskewing service
+    from services import deskew_service
+
+    # Determine output path based on source type
+    if is_pdf_source:
+        # PDF source: create new processed image
+        processed_path_obj = Path(processed_image_path)
+        filename_parts = processed_path_obj.stem.split('_', 1)
+        if len(filename_parts) > 1:
+            new_filename = f"{receipt_id}_{filename_parts[1]}.jpg"
+        else:
+            new_filename = f"{receipt_id}_{processed_path_obj.stem}.jpg"
+        output_path = str(processed_path_obj.parent / new_filename)
+    else:
+        # Photo source: replace existing processed image
+        output_path = processed_image_path
+
+    # Apply deskewing
+    success, result = deskew_service.deskew_image_by_angle(processed_image_path, angle, output_path)
+
+    if not success:
+        error_msg = result.get('error', 'Unknown error')
+        await query.edit_message_text(f'❌ Deskewing failed: {error_msg}\n\nPlease try again or choose "Process As-Is".')
+        logger.error(f"Deskewing failed for receipt {receipt_id}: {error_msg}")
+        return
+
+    # Update database if PDF source (new file created)
+    if is_pdf_source and output_path != processed_image_path:
+        import os
+        processed_size = os.path.getsize(output_path)
+        db.update_image_processed(image_id, output_path, processed_size)
+        logger.info(f"Updated image {image_id} with deskewed path: {output_path}")
+
+    # Update user: deskewing complete
+    await query.edit_message_text(
+        '✅ Image deskewed. Processing...'
+    )
+
+    # Continue with Claude analysis
+    from services.receipt_analyzer import analyze_receipt_with_claude
+
+    # Use the status message for updates
+    status_message = query.message
+
+    await analyze_receipt_with_claude(
+        context, db, receipt_id, image_id, output_path, status_message
+    )
+
+    # Clean up temporary data
+    context.user_data.pop('pending_skew_analysis', None)
+
+
+async def handle_proceed_skewed_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle callback when user chooses to process the image as-is (with skew)."""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    receipt_id = int(query.data.split('_')[-1])
+
+    logger.info(f"User {user_id} chose to proceed with skewed receipt {receipt_id}")
+
+    # Get database connection
+    db = context.bot_data.get('database')
+    if not db:
+        logger.error("Database connection not available")
+        await query.edit_message_text('❌ Database not available.')
+        return
+
+    # Verify receipt ownership
+    if not db.verify_receipt_owner(receipt_id, user_id):
+        await query.edit_message_text('❌ Receipt not found or access denied.')
+        logger.warning(f"Unauthorized access attempt: user {user_id} tried to process receipt {receipt_id}")
+        return
+
+    # Get pending skew analysis data
+    skew_data = context.user_data.get('pending_skew_analysis')
+    if not skew_data or skew_data['receipt_id'] != receipt_id:
+        await query.edit_message_text('❌ Analysis data not found. Please try uploading the image again.')
+        logger.error(f"Skew data not found for receipt {receipt_id}")
+        return
+
+    processed_image_path = skew_data['processed_image_path']
+    image_id = skew_data['image_id']
+
+    # Update user: processing
+    await query.edit_message_text('🤖 Analyzing with AI...')
+
+    # Continue with Claude analysis (using existing processed image)
+    from services.receipt_analyzer import analyze_receipt_with_claude
+
+    # Use the status message for updates
+    status_message = query.message
+
+    await analyze_receipt_with_claude(
+        context, db, receipt_id, image_id, processed_image_path, status_message
+    )
+
+    # Clean up temporary data
+    context.user_data.pop('pending_skew_analysis', None)
+
+
+async def handle_skew_discard_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle callback when user chooses to discard the receipt and rescan (from skew warning)."""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    receipt_id = int(query.data.split('_')[-1])
+
+    logger.info(f"User {user_id} chose to discard receipt {receipt_id}")
+
+    # Get database connection
+    db = context.bot_data.get('database')
+    if not db:
+        logger.error("Database connection not available")
+        await query.edit_message_text('❌ Database not available.')
+        return
+
+    # Verify receipt ownership and delete
+    success = db.mark_receipt_as_deleted(receipt_id, user_id)
+
+    if success:
+        await query.edit_message_text(
+            '✅ Receipt discarded. Please rescan and send a new image.'
+        )
+        logger.info(f"Receipt {receipt_id} soft-deleted by user {user_id}")
+    else:
+        await query.edit_message_text('❌ Receipt not found or access denied.')
+        logger.warning(f"Unauthorized delete attempt: user {user_id} tried to delete receipt {receipt_id}")
+
+    # Clean up temporary data
+    context.user_data.pop('pending_skew_analysis', None)

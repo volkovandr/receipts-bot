@@ -6,7 +6,8 @@ YOUR TASK: Extract merchant info, all items with prices, and categorize each ite
 
 1. LAYOUT UNDERSTANDING (fixes alignment issues):
    - Receipts follow a structured layout: [Item Name] [spaces/dots] [Price]
-   - Prices are ALWAYS right-aligned
+   - Prices are right-aligned
+   - In many times to the right of the price there is a VAT indicator: Digits 1 or 2 or letters A or B. Ignore them.
    - If you see a number on the right edge, it's likely a price
    - Work BACKWARDS: find all prices first, then match them to item names on the same line
    - Multi-column receipts: items are in the left column, prices in the right column
@@ -68,8 +69,10 @@ YOUR TASK: Extract merchant info, all items with prices, and categorize each ite
 5. NON-ITEM DETECTION (don't include as items):
    - Subtotals: "SUMME", "ZWISCHENSUMME", "Subtotal", "ZU ZAHLEN", "ENDSUMME" (when explicitly labeled as subtotal)
    - Tax lines: "MwSt", "VAT", "Steuer %" (only when showing tax breakdown, not item tax codes like "B" or "A")
-   - Payment lines: "ZAHLUNG", "BEZAHLT", "Geg. EC-Cash", "Bar", "Kartenzahlung", "KARTENZAHLUNG", "ZU ZAHLEN"
+   - Payment lines: "ZAHLUNG", "BEZAHLT", "Geg. EC-Cash", "Bar", "Kartenzahlung", "KARTENZAHLUNG EUR", "ZU ZAHLEN". 
+     Sometimes the payment line is listed right after the list of items with a negative amount. This is not an item!
    - Final totals: "GESAMT", "TOTAL" (when clearly the final line)
+   - Anything that comes after the total amount "SUMME EUR"
    - Receipt footer: "Danke", "Vielen Dank", promotional text, "Maestro", payment method names
    
    KEY DISTINCTION: 
@@ -98,7 +101,7 @@ YOUR TASK: Extract merchant info, all items with prices, and categorize each ite
    - Date is likely to be formatted as YYYY-MM-DD or DD.MM.YYYY
    - Date/time information is often located next to the payment details
    - The receipt total amount is directly below the list of items, marked as "SUMME" or "ENDSUMME" or "ZU ZAHLEN". If that is not clear take it from the payment information. 
-   - Do not take the receipt fotal from the VAT details information (the brutto value) as this might be misleading.
+   - Do not take the receipt fotal from the VAT details information (the brutto value) as this might be misleading.   
 
 === EXTRACTION PROCESS ===
 
@@ -170,29 +173,27 @@ EXAMPLE WALKTHROUGH 1 (Quantity BELOW Item):
 Receipt shows:
   ITEM A                    3.98
       2 x 1.99 €
-  ITEM B                    1.79
+  ITEM B                    1.58
       0.792 kg x 1.99 €/kg
-  ITEM C                    1.58
+  ITEM C                    1.79
 
-Step 1 - Detect pattern:
+Phase 1 - Detect pattern:
 - First quantity line: "2 x 1.99 €"
 - Calculate: 2 × 1.99 = 3.98
 - Check ITEM A (above): 3.98 = 3.98 ✓
 - Check ITEM B (below): 3.98 ≠ 1.79 ✗
 - PATTERN DETECTED: "QUANTITY BELOW ITEM"
 
-Step 2 - Apply pattern:
+Phase 2 - Apply pattern:
 - Second quantity line: "0.792 kg x 1.99 €/kg"
 - Calculate: 0.792 × 1.99 = 1.58
 - Apply pattern: assign to item ABOVE → ITEM B
-- Verify: 1.58 ≠ 1.79 ✗ (pattern fails!)
-- Try exception: assign to item BELOW → ITEM C
 - Verify: 1.58 = 1.58 ✓ (correct!)
 
 Result:
 - ITEM A: quantity=2, unit_price=1.99, total_price=3.98 (pattern match)
-- ITEM B: total_price=1.79 (no quantity, quantity = 1 implicit)
-- ITEM C: quantity=0.792, unit_price=1.99, total_price=1.58 (exception)
+- ITEM B: quantity=0.792, unit_price=1.99, total_price=1.58 (pattern match)
+- ITEM C: total_price=1.79 (no quantity, quantity = 1 implicit)
 
 EXAMPLE WALKTHROUGH 2 (Quantity ABOVE Item):
 Receipt shows:
@@ -201,14 +202,14 @@ Receipt shows:
       2 x 2.29 €
   ITEM Y                    4.58
 
-Step 1 - Detect pattern:
+Phase 1 - Detect pattern:
 - First quantity line: "3 x 1.69 €"
 - Calculate: 3 × 1.69 = 5.07
 - Check for item ABOVE: none (this is first line)
 - Check ITEM X (below): 5.07 = 5.07 ✓
 - PATTERN DETECTED: "QUANTITY ABOVE ITEM"
 
-Step 2 - Apply pattern:
+Phase 2 - Apply pattern:
 - Second quantity line: "2 x 2.29 €"
 - Calculate: 2 × 2.29 = 4.58
 - Apply pattern: assign to item BELOW → ITEM Y
