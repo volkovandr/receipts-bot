@@ -168,6 +168,16 @@ async def process_image(update: Update, context: ContextTypes.DEFAULT_TYPE, is_d
         await file.download_to_drive(file_path)
         logger.info(f"File saved: {file_path}")
 
+        # Delete original message immediately (privacy/security)
+        # We have the file saved locally, no need to keep it in Telegram
+        original_message_id = update.message.message_id
+        chat_id = update.message.chat_id
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=original_message_id)
+            logger.info(f"Deleted original message {original_message_id} immediately after download")
+        except Exception as delete_error:
+            logger.warning(f"Failed to delete original message {original_message_id}: {delete_error}")
+
         # Convert PDF to image if needed
         is_pdf = mime_type == 'application/pdf'
         if is_pdf:

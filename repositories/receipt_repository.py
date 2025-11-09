@@ -1025,6 +1025,7 @@ class ReceiptRepository:
         Returns:
             Dictionary with keys:
             - merchant_name: str
+            - merchant_city: str (or None if not set)
             - transaction_date: str
             - currency: str
             - brutto_amount: float
@@ -1045,6 +1046,7 @@ class ReceiptRepository:
                         """
                         SELECT
                             COALESCE(m.name, 'Unknown') as merchant_name,
+                            m.city as merchant_city,
                             COALESCE(t.date::text, 'N/A') as transaction_date,
                             COALESCE(t.currency, 'EUR') as currency,
                             t.brutto_amount,
@@ -1067,6 +1069,7 @@ class ReceiptRepository:
                         """
                         SELECT
                             COALESCE(m.name, 'Unknown') as merchant_name,
+                            m.city as merchant_city,
                             COALESCE(t.date::text, 'N/A') as transaction_date,
                             COALESCE(t.currency, 'EUR') as currency,
                             t.brutto_amount,
@@ -1088,15 +1091,16 @@ class ReceiptRepository:
                 result = cursor.fetchone()
 
                 if result:
-                    raw_data = result[4] if result[4] else {}
+                    raw_data = result[5] if result[5] else {}
                     return {
                         'merchant_name': result[0],
-                        'transaction_date': result[1],
-                        'currency': result[2],
-                        'brutto_amount': float(result[3]) if result[3] is not None else None,
+                        'merchant_city': result[1],
+                        'transaction_date': result[2],
+                        'currency': result[3],
+                        'brutto_amount': float(result[4]) if result[4] is not None else None,
                         'uncertain_fields': raw_data.get('uncertain_fields', []),
                         'need_clarification': raw_data.get('need_clarification', []),
-                        'has_edits': result[5]
+                        'has_edits': result[6]
                     }
                 else:
                     if user_id is not None:

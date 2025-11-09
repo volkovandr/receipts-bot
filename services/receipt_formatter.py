@@ -32,6 +32,7 @@ def format_receipt_summary(db, receipt_id: int, user_id: int = None) -> tuple[st
         raise ValueError(f"Receipt {receipt_id} not found or access denied")
 
     merchant_name = receipt_data.get('merchant_name', 'Unknown')
+    merchant_city = receipt_data.get('merchant_city')
     transaction_date = receipt_data.get('transaction_date', 'N/A')
     currency = receipt_data.get('currency', 'EUR')
     brutto_amount = receipt_data.get('brutto_amount')
@@ -49,9 +50,13 @@ def format_receipt_summary(db, receipt_id: int, user_id: int = None) -> tuple[st
         is_consistent = False
 
     # Build message
+    merchant_line = f'🏪 Merchant: {merchant_name}'
+    if merchant_city:
+        merchant_line += f', {merchant_city}'
+
     message_text = (
         '✅ Receipt Summary\n\n'
-        f'🏪 Merchant: {merchant_name}\n'
+        f'{merchant_line}\n'
         f'📅 Date: {transaction_date}\n'
         f'📝 Items: {total_items}\n'
     )
