@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
+from telegram.error import BadRequest
 from services.receipt_formatter import format_receipt_summary
 
 logger = logging.getLogger(__name__)
@@ -61,12 +62,13 @@ async def show_edit_item_view(query, db, receipt_id: int, item_index: int, user_
     keyboard = []
 
     # Action buttons for current item
+    # Note: item_name is NOT included in callback_data to avoid Telegram's 64-byte limit
     keyboard.append([
         InlineKeyboardButton("❌ Delete", callback_data=f"del_item_{item_id}_{receipt_id}_{item_index}"),
-        InlineKeyboardButton("💰 Edit amount", callback_data=f"edit_amt_{item_id}_{receipt_id}_{item_index}_{item_name}"),
+        InlineKeyboardButton("💰 Edit amount", callback_data=f"edit_amt_{item_id}_{receipt_id}_{item_index}"),
     ])
     keyboard.append([
-        InlineKeyboardButton("🏷️ Change category", callback_data=f"edit_cat_{item_id}_{receipt_id}_{item_index}_{item_name}")
+        InlineKeyboardButton("🏷️ Change category", callback_data=f"edit_cat_{item_id}_{receipt_id}_{item_index}")
     ])
 
     # Navigation buttons
@@ -87,12 +89,35 @@ async def show_edit_item_view(query, db, receipt_id: int, item_index: int, user_
     try:
         await query.edit_message_text(message_text, reply_markup=reply_markup)
         logger.info(f"Showing item {item_index + 1}/{len(items)} for receipt {receipt_id} to user {user_id}")
-    except Exception as edit_error:
+    except BadRequest as edit_error:
         # Handle "message not modified" error - just acknowledge silently
         if "message is not modified" in str(edit_error).lower():
             logger.debug(f"Message not modified for receipt {receipt_id} item {item_index}")
         else:
+            # Log detailed debug information for any BadRequest error
+            logger.error(f"BadRequest error editing message: {edit_error}")
+            logger.error(f"Receipt ID: {receipt_id}, Item index: {item_index}, User ID: {user_id}")
+            logger.error(f"Message text length: {len(message_text)} characters")
+            logger.error(f"Keyboard structure: {len(keyboard)} rows, {sum(len(row) for row in keyboard)} total buttons")
+
+            # Log all callback_data for debugging
+            all_callback_data = []
+            for row_idx, row in enumerate(keyboard):
+                for btn_idx, button in enumerate(row):
+                    all_callback_data.append(button.callback_data)
+                    logger.error(f"  Row {row_idx}, Button {btn_idx}: text='{button.text}', callback_data='{button.callback_data}' ({len(button.callback_data)} bytes)")
+
+            # Check for duplicates
+            if len(all_callback_data) != len(set(all_callback_data)):
+                logger.error(f"WARNING: Duplicate callback_data detected!")
+                logger.error(f"All callback_data: {all_callback_data}")
+
+            logger.error(f"Message text preview (first 200 chars): {message_text[:200]}")
             raise
+    except Exception as edit_error:
+        logger.error(f"Unexpected error editing message: {edit_error}")
+        logger.error(f"Exception type: {type(edit_error).__name__}")
+        raise
 
 
 async def handle_view_items_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -311,6 +336,8 @@ async def handle_edit_receipt_callback(update: Update, context: ContextTypes.DEF
         await show_edit_item_view(query, db, receipt_id, item_index, user_id)
     except Exception as e:
         logger.error(f"Error getting items for receipt {receipt_id}: {e}")
+        logger.error(f"Exception type: {type(e).__name__}")
+        logger.error(f"Exception details: {str(e)}")
         try:
             await query.edit_message_text(
                 f"❌ Error loading items!\n\n"
@@ -393,21 +420,46 @@ async def handle_edit_amount_callback(update: Update, context: ContextTypes.DEFA
     query = update.callback_query
     await query.answer()
 
-    # Extract item_id, receipt_id, item_index, and item_name from callback_data: edit_amt_{item_id}_{receipt_id}_{item_index}_{item_name}
+    # Extract item_id, receipt_id, and item_index from callback_data: edit_amt_{item_id}_{receipt_id}_{item_index}
     callback_data = query.data
     if not callback_data.startswith("edit_amt_"):
         logger.warning(f"Invalid callback data: {callback_data}")
         return
 
     try:
-        parts = callback_data.replace("edit_amt_", "").split("_", 3)
+        parts = callback_data.replace("edit_amt_", "").split("_")
         item_id = int(parts[0])
         receipt_id = int(parts[1])
         item_index = int(parts[2]) if len(parts) > 2 else 0
-        item_name = parts[3] if len(parts) > 3 else "item"
     except (ValueError, IndexError):
         logger.error(f"Failed to parse callback_data: {callback_data}")
         await query.edit_message_text("❌ Error: Invalid data")
+        return
+
+    # Get database from context
+    db = context.bot_data.get('database')
+    if not db:
+        logger.error("Database connection not available")
+        await query.edit_message_text("❌ Error: Database not available")
+        return
+
+    # Get user ID for authorization check
+    user_id = query.from_user.id
+
+    # Fetch item details to get the name
+    try:
+        items = db.get_receipt_items_detailed(receipt_id, user_id)
+        item = next((i for i in items if i['item_id'] == item_id), None)
+
+        if not item:
+            await query.edit_message_text("❌ Item not found or access denied")
+            logger.warning(f"User {user_id} attempted to edit item {item_id} - not found or not authorized")
+            return
+
+        item_name = item['item_name']
+    except Exception as e:
+        logger.error(f"Error fetching item details: {e}")
+        await query.edit_message_text("❌ Error loading item details")
         return
 
     # Set editing mode in user context
@@ -431,21 +483,46 @@ async def handle_edit_category_callback(update: Update, context: ContextTypes.DE
     query = update.callback_query
     await query.answer()
 
-    # Extract item_id, receipt_id, item_index, and item_name from callback_data: edit_cat_{item_id}_{receipt_id}_{item_index}_{item_name}
+    # Extract item_id, receipt_id, and item_index from callback_data: edit_cat_{item_id}_{receipt_id}_{item_index}
     callback_data = query.data
     if not callback_data.startswith("edit_cat_"):
         logger.warning(f"Invalid callback data: {callback_data}")
         return
 
     try:
-        parts = callback_data.replace("edit_cat_", "").split("_", 3)
+        parts = callback_data.replace("edit_cat_", "").split("_")
         item_id = int(parts[0])
         receipt_id = int(parts[1])
         item_index = int(parts[2]) if len(parts) > 2 else 0
-        item_name = parts[3] if len(parts) > 3 else "item"
     except (ValueError, IndexError):
         logger.error(f"Failed to parse callback_data: {callback_data}")
         await query.edit_message_text("❌ Error: Invalid data")
+        return
+
+    # Get database from context
+    db = context.bot_data.get('database')
+    if not db:
+        logger.error("Database connection not available")
+        await query.edit_message_text("❌ Error: Database not available")
+        return
+
+    # Get user ID for authorization check
+    user_id = query.from_user.id
+
+    # Fetch item details to get the name
+    try:
+        items = db.get_receipt_items_detailed(receipt_id, user_id)
+        item = next((i for i in items if i['item_id'] == item_id), None)
+
+        if not item:
+            await query.edit_message_text("❌ Item not found or access denied")
+            logger.warning(f"User {user_id} attempted to edit item {item_id} - not found or not authorized")
+            return
+
+        item_name = item['item_name']
+    except Exception as e:
+        logger.error(f"Error fetching item details: {e}")
+        await query.edit_message_text("❌ Error loading item details")
         return
 
     # Set editing mode in user context
@@ -663,3 +740,177 @@ async def handle_cancel_edit_callback(update: Update, context: ContextTypes.DEFA
     )
 
     logger.info(f"User {query.from_user.id} cancelled editing")
+
+
+async def handle_deskew_proceed_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle callback when user chooses to deskew and process the image."""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    receipt_id = int(query.data.split('_')[-1])
+
+    logger.info(f"User {user_id} chose to deskew receipt {receipt_id}")
+
+    # Get database connection
+    db = context.bot_data.get('database')
+    if not db:
+        logger.error("Database connection not available")
+        await query.edit_message_text('❌ Database not available.')
+        return
+
+    # Verify receipt ownership
+    if not db.verify_receipt_owner(receipt_id, user_id):
+        await query.edit_message_text('❌ Receipt not found or access denied.')
+        logger.warning(f"Unauthorized access attempt: user {user_id} tried to deskew receipt {receipt_id}")
+        return
+
+    # Get pending skew analysis data
+    skew_data = context.user_data.get('pending_skew_analysis')
+    if not skew_data or skew_data['receipt_id'] != receipt_id:
+        await query.edit_message_text('❌ Skew analysis data not found. Please try uploading the image again.')
+        logger.error(f"Skew data not found for receipt {receipt_id}")
+        return
+
+    processed_image_path = skew_data['processed_image_path']
+    is_pdf_source = skew_data['is_pdf_source']
+    skew_analysis = skew_data['skew_analysis']
+    image_id = skew_data['image_id']
+    angle = skew_analysis['max_skew_angle']
+
+    # Update user: deskewing in progress
+    await query.edit_message_text('🔄 Deskewing image...')
+
+    # Import deskewing service
+    from services import deskew_service
+
+    # Determine output path based on source type
+    if is_pdf_source:
+        # PDF source: create new processed image
+        processed_path_obj = Path(processed_image_path)
+        filename_parts = processed_path_obj.stem.split('_', 1)
+        if len(filename_parts) > 1:
+            new_filename = f"{receipt_id}_{filename_parts[1]}.jpg"
+        else:
+            new_filename = f"{receipt_id}_{processed_path_obj.stem}.jpg"
+        output_path = str(processed_path_obj.parent / new_filename)
+    else:
+        # Photo source: replace existing processed image
+        output_path = processed_image_path
+
+    # Apply deskewing
+    success, result = deskew_service.deskew_image_by_angle(processed_image_path, angle, output_path)
+
+    if not success:
+        error_msg = result.get('error', 'Unknown error')
+        await query.edit_message_text(f'❌ Deskewing failed: {error_msg}\n\nPlease try again or choose "Process As-Is".')
+        logger.error(f"Deskewing failed for receipt {receipt_id}: {error_msg}")
+        return
+
+    # Update database if PDF source (new file created)
+    if is_pdf_source and output_path != processed_image_path:
+        import os
+        processed_size = os.path.getsize(output_path)
+        db.update_image_processed(image_id, output_path, processed_size)
+        logger.info(f"Updated image {image_id} with deskewed path: {output_path}")
+
+    # Update user: deskewing complete
+    await query.edit_message_text(
+        '✅ Image deskewed. Processing...'
+    )
+
+    # Continue with Claude analysis
+    from services.receipt_analyzer import analyze_receipt_with_claude
+
+    # Use the status message for updates
+    status_message = query.message
+
+    await analyze_receipt_with_claude(
+        context, db, receipt_id, image_id, output_path, status_message
+    )
+
+    # Clean up temporary data
+    context.user_data.pop('pending_skew_analysis', None)
+
+
+async def handle_proceed_skewed_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle callback when user chooses to process the image as-is (with skew)."""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    receipt_id = int(query.data.split('_')[-1])
+
+    logger.info(f"User {user_id} chose to proceed with skewed receipt {receipt_id}")
+
+    # Get database connection
+    db = context.bot_data.get('database')
+    if not db:
+        logger.error("Database connection not available")
+        await query.edit_message_text('❌ Database not available.')
+        return
+
+    # Verify receipt ownership
+    if not db.verify_receipt_owner(receipt_id, user_id):
+        await query.edit_message_text('❌ Receipt not found or access denied.')
+        logger.warning(f"Unauthorized access attempt: user {user_id} tried to process receipt {receipt_id}")
+        return
+
+    # Get pending skew analysis data
+    skew_data = context.user_data.get('pending_skew_analysis')
+    if not skew_data or skew_data['receipt_id'] != receipt_id:
+        await query.edit_message_text('❌ Analysis data not found. Please try uploading the image again.')
+        logger.error(f"Skew data not found for receipt {receipt_id}")
+        return
+
+    processed_image_path = skew_data['processed_image_path']
+    image_id = skew_data['image_id']
+
+    # Update user: processing
+    await query.edit_message_text('🤖 Analyzing with AI...')
+
+    # Continue with Claude analysis (using existing processed image)
+    from services.receipt_analyzer import analyze_receipt_with_claude
+
+    # Use the status message for updates
+    status_message = query.message
+
+    await analyze_receipt_with_claude(
+        context, db, receipt_id, image_id, processed_image_path, status_message
+    )
+
+    # Clean up temporary data
+    context.user_data.pop('pending_skew_analysis', None)
+
+
+async def handle_skew_discard_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle callback when user chooses to discard the receipt and rescan (from skew warning)."""
+    query = update.callback_query
+    await query.answer()
+
+    user_id = query.from_user.id
+    receipt_id = int(query.data.split('_')[-1])
+
+    logger.info(f"User {user_id} chose to discard receipt {receipt_id}")
+
+    # Get database connection
+    db = context.bot_data.get('database')
+    if not db:
+        logger.error("Database connection not available")
+        await query.edit_message_text('❌ Database not available.')
+        return
+
+    # Verify receipt ownership and delete
+    success = db.mark_receipt_as_deleted(receipt_id, user_id)
+
+    if success:
+        await query.edit_message_text(
+            '✅ Receipt discarded. Please rescan and send a new image.'
+        )
+        logger.info(f"Receipt {receipt_id} soft-deleted by user {user_id}")
+    else:
+        await query.edit_message_text('❌ Receipt not found or access denied.')
+        logger.warning(f"Unauthorized delete attempt: user {user_id} tried to delete receipt {receipt_id}")
+
+    # Clean up temporary data
+    context.user_data.pop('pending_skew_analysis', None)

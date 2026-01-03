@@ -3,6 +3,8 @@ Receipt analysis service using Claude AI.
 """
 import logging
 from services.receipt_formatter import format_receipt_summary
+from services.metrics_service import MetricsService
+from services.receipt_validator import validate_and_enrich_items
 
 logger = logging.getLogger(__name__)
 
@@ -33,28 +35,38 @@ async def analyze_receipt_with_claude(context, db, receipt_id, image_id, image_p
         # Update receipt status to 'processing'
         db.update_receipt_status(receipt_id, 'processing')
 
-        # Get categories from database
-        categories = db.get_all_categories()
+        # Get categories with IDs from database
+        categories = db.get_all_categories_with_ids()
         logger.info(f"Loaded {len(categories)} categories for analysis")
 
-        # Get category notes from database
+        # Get category notes from database (now includes IDs)
         category_notes = db.get_categories_with_notes()
         logger.info(f"Loaded {len(category_notes)} category notes for analysis")
 
+        # Get merchant notes from database
+        merchant_notes = db.get_merchants_with_notes()
+        logger.info(f"Loaded {len(merchant_notes)} merchant notes for analysis")
+
+        # Get user notes from receipt
+        user_notes = db.get_user_notes_by_receipt_id(receipt_id)
+        if user_notes:
+            logger.info(f"User notes found for receipt {receipt_id}: {user_notes[:100]}...")
+
         # Analyze receipt with Claude
         receipt_data, input_tokens, output_tokens = claude_service.analyze_receipt(
-            image_path, categories, category_notes
+            image_path, categories, category_notes, merchant_notes, user_notes
         )
 
         # Extract data from response
         extraction_status = receipt_data.get('extraction_status', 'unknown')
         merchant_data = receipt_data.get('merchant', {})
         transaction_data = receipt_data.get('transaction', {})
-        items = receipt_data.get('items', [])
+        items_raw = receipt_data.get('items', [])
+        categories_data = receipt_data.get('categories', [])
         uncertain_fields = receipt_data.get('uncertain_fields', [])
         need_clarification = receipt_data.get('need_clarification', [])
 
-        # Insert AI analysis record
+        # Insert AI analysis record BEFORE validation (to preserve original Claude response)
         ai_analysis_id = db.insert_ai_analysis(
             model_name=context.bot_data['claude_service'].model,
             extraction_status=extraction_status,
@@ -62,6 +74,55 @@ async def analyze_receipt_with_claude(context, db, receipt_id, image_id, image_p
             output_tokens=output_tokens,
             raw_data=receipt_data
         )
+
+        # Validate and enrich items with categories
+        # NOTE: This modifies items in-place, so we do it AFTER storing raw_data
+        try:
+            config = context.bot_data.get('config')
+            default_category_name = config.default_category if config else 'Uncategorized'
+
+            # Build category lookup dict from database categories
+            categories_lookup = dict(categories)  # {category_id: category_name}
+
+            # Get default category ID
+            default_category_id = db.get_category_id_by_name(default_category_name)
+            if default_category_id is None:
+                logger.error(f"Default category '{default_category_name}' not found in database")
+                raise ValueError(f"Default category '{default_category_name}' not found in database")
+
+            items = validate_and_enrich_items(
+                items=items_raw,
+                categories_data=categories_data,
+                categories_lookup=categories_lookup,
+                default_category_id=default_category_id,
+                default_category_name=default_category_name
+            )
+            logger.info(f"Successfully validated and enriched {len(items)} items")
+        except ValueError as e:
+            # Validation failed - mark receipt as failed
+            logger.error(f"Item validation failed for receipt {receipt_id}: {e}")
+
+            # Update AI analysis record with error
+            db.update_ai_analysis_error(ai_analysis_id, f"Validation error: {str(e)}")
+
+            # Update receipt with failed analysis
+            db.update_receipt_with_analysis(
+                receipt_id=receipt_id,
+                merchant_id=None,
+                transaction_id=None,
+                ai_analysis_id=ai_analysis_id
+            )
+
+            # Update receipt status to 'failed'
+            db.update_receipt_status(receipt_id, 'failed')
+
+            await status_message.edit_text(
+                '❌ Analysis failed!\n\n'
+                'There was a problem with the AI response:\n'
+                f'{str(e)}\n\n'
+                'The image has been saved. Please try again or contact support.'
+            )
+            return
 
         # Insert merchant
         merchant_id = db.insert_or_get_merchant(
@@ -116,6 +177,30 @@ async def analyze_receipt_with_claude(context, db, receipt_id, image_id, image_p
 
         # Get user ID for authorization
         user_id = status_message.chat.id
+
+        # Record receipt and item metrics
+        final_status = 'completed/inconsistent' if not is_consistent else 'completed'
+        currency = transaction_data.get('currency', 'EUR')
+
+        # Record receipt metrics
+        if receipt_total is not None:
+            MetricsService.record_receipt(
+                status=final_status,
+                user_id=user_id,
+                value=float(receipt_total),
+                currency=currency
+            )
+
+        # Record item metrics
+        for item in items:
+            item_category = item.get('category', 'Uncategorized')
+            item_total = item.get('total_price', 0.0)
+            MetricsService.record_item(
+                category=item_category,
+                user_id=user_id,
+                value=float(item_total),
+                currency=currency
+            )
 
         # Format receipt summary using the formatter
         try:

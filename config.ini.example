@@ -14,3 +14,22 @@ api_key = your_anthropic_api_key_here
 prompt_template = prompt.txt
 model = claude-sonnet-4-5-20250929
 enable_prompt_caching = false
+
+[prometheus]
+enabled = true
+port = 8000
+
+[receipt_processing]
+default_category = Uncategorized
+
+[skew_detection]
+# Skew angle threshold in degrees
+# Images with skew above this threshold will trigger user warning
+threshold = 1.0
+
+# Minimum number of text line contours required for reliable detection
+min_contours = 3
+
+# Morphological kernel size for text line detection (width, height)
+kernel_width = 50
+kernel_height = 2

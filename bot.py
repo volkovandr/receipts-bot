@@ -12,6 +12,7 @@ from config import Config
 from database import Database
 from services.image_processor import ImageProcessor
 from services.claude_service import ClaudeService
+from services.metrics_service import MetricsService
 from handlers.commands import start, hello, receipts
 from handlers.images import handle_photo, handle_document
 from handlers.callbacks import (
@@ -19,7 +20,8 @@ from handlers.callbacks import (
     handle_edit_receipt_callback, handle_delete_item_callback,
     handle_edit_amount_callback, handle_edit_category_callback,
     handle_category_select_callback, handle_category_create_callback,
-    handle_back_to_summary_callback, handle_cancel_edit_callback
+    handle_back_to_summary_callback, handle_cancel_edit_callback,
+    handle_deskew_proceed_callback, handle_proceed_skewed_callback, handle_skew_discard_callback
 )
 from handlers.messages import handle_text_message
 
@@ -55,6 +57,15 @@ def main() -> None:
     if not config.validate():
         return
 
+    # Initialize Prometheus metrics
+    if config.prometheus_enabled:
+        try:
+            MetricsService.initialize(port=config.prometheus_port)
+            logger.info(f"Prometheus metrics enabled on port {config.prometheus_port}")
+        except Exception as e:
+            logger.error(f"Failed to initialize Prometheus metrics: {e}")
+            logger.warning("Continuing without metrics...")
+
     # Initialize database
     db = Database(config.db_host, config.db_port, config.db_name, config.db_user, config.db_password)
     try:
@@ -87,10 +98,11 @@ def main() -> None:
     # Create the Application
     application = Application.builder().token(config.telegram_bot_token).build()
 
-    # Store database, image processor, and claude service in bot_data for handlers to access
+    # Store database, image processor, claude service, and config in bot_data for handlers to access
     application.bot_data['database'] = db
     application.bot_data['image_processor'] = image_processor
     application.bot_data['claude_service'] = claude_service
+    application.bot_data['config'] = config
 
     # Wrap handlers with authorization decorator
     authorized_start = authorized_only(start)
@@ -116,6 +128,11 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(handle_category_create_callback, pattern="^create_cat_"))
     application.add_handler(CallbackQueryHandler(handle_back_to_summary_callback, pattern="^back_summary_"))
     application.add_handler(CallbackQueryHandler(handle_cancel_edit_callback, pattern="^cancel_edit"))
+
+    # Skew detection callback handlers
+    application.add_handler(CallbackQueryHandler(handle_deskew_proceed_callback, pattern="^deskew_proceed_"))
+    application.add_handler(CallbackQueryHandler(handle_proceed_skewed_callback, pattern="^proceed_skewed_"))
+    application.add_handler(CallbackQueryHandler(handle_skew_discard_callback, pattern="^skew_discard_"))
 
     # Register message handlers
     application.add_handler(MessageHandler(filters.PHOTO, authorized_photo))

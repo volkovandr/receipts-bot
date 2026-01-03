@@ -5,14 +5,56 @@ import logging
 import os
 from pathlib import Path
 from datetime import datetime
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
 from pdf2image import convert_from_path
+from services.skew_detector import get_region_position_name
 
 logger = logging.getLogger(__name__)
 
 # Image storage directory
 IMAGES_DIR = Path("images/orig")
+
+
+async def show_skew_warning(update: Update, status_message, skew_analysis: dict, receipt_id: int) -> None:
+    """
+    Show skew warning message with user choices.
+
+    Args:
+        update: Telegram update object
+        status_message: Status message to edit
+        skew_analysis: Skew analysis results from skew_detector
+        receipt_id: Receipt ID for callback handlers
+    """
+    max_skew = skew_analysis['max_skew_angle']
+    region_index = skew_analysis['max_skew_region']
+    num_regions = skew_analysis['num_regions']
+
+    # Get region position name
+    region_name = get_region_position_name(region_index, num_regions)
+
+    # Determine tilt direction
+    direction = "right" if max_skew > 0 else "left"
+
+    # Build warning message
+    warning_text = (
+        f"⚠️ SKEW DETECTED\n\n"
+        f"Significant skew detected in the {region_name} part of the image.\n\n"
+        f"Skew angle: {abs(max_skew):.2f}° (tilted to the {direction})\n"
+        f"This may cause incorrect alignment of items and prices during analysis.\n\n"
+        f"What would you like to do?"
+    )
+
+    # Create inline keyboard with options
+    keyboard = [
+        [InlineKeyboardButton("🔄 Deskew & Process", callback_data=f"deskew_proceed_{receipt_id}")],
+        [InlineKeyboardButton("▶️ Process As-Is", callback_data=f"proceed_skewed_{receipt_id}")],
+        [InlineKeyboardButton("🗑️ Discard & Rescan", callback_data=f"skew_discard_{receipt_id}")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await status_message.edit_text(warning_text, reply_markup=reply_markup)
+    logger.info(f"Skew warning shown for receipt {receipt_id}: {abs(max_skew):.2f}° in {region_name} region")
 
 
 def convert_pdf_to_image(pdf_path: str) -> str:
@@ -78,6 +120,28 @@ async def process_image(update: Update, context: ContextTypes.DEFAULT_TYPE, is_d
         is_document: True if image was sent as document, False if sent as photo
     """
     try:
+        # Extract caption (user notes) from message
+        user_notes = update.message.caption if update.message.caption else None
+
+        # If no caption, check for recent text message (external app sharing scenario)
+        if not user_notes:
+            import time
+            pending_note = context.user_data.get('pending_user_note')
+            if pending_note:
+                # Check if the text message was sent within last 10 seconds
+                time_diff = time.time() - pending_note['timestamp']
+                if time_diff <= 10:
+                    user_notes = pending_note['text']
+                    logger.info(f"Using preceding text message as user notes (sent {time_diff:.1f}s before image)")
+                    # Clear the pending note
+                    context.user_data.pop('pending_user_note', None)
+                else:
+                    logger.debug(f"Ignoring old text message (sent {time_diff:.1f}s ago)")
+                    context.user_data.pop('pending_user_note', None)
+
+        if user_notes:
+            logger.info(f"User provided notes: {user_notes[:100]}...")
+
         # Get the file object
         if is_document:
             file = await update.message.document.get_file()
@@ -103,6 +167,16 @@ async def process_image(update: Update, context: ContextTypes.DEFAULT_TYPE, is_d
         # Download and save the file
         await file.download_to_drive(file_path)
         logger.info(f"File saved: {file_path}")
+
+        # Delete original message immediately (privacy/security)
+        # We have the file saved locally, no need to keep it in Telegram
+        original_message_id = update.message.message_id
+        chat_id = update.message.chat_id
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=original_message_id)
+            logger.info(f"Deleted original message {original_message_id} immediately after download")
+        except Exception as delete_error:
+            logger.warning(f"Failed to delete original message {original_message_id}: {delete_error}")
 
         # Convert PDF to image if needed
         is_pdf = mime_type == 'application/pdf'
@@ -138,11 +212,12 @@ async def process_image(update: Update, context: ContextTypes.DEFAULT_TYPE, is_d
             mime_type=mime_type
         )
 
-        # Create receipt record with status 'created'
+        # Create receipt record with status 'created' and user notes
         receipt_id = db.insert_receipt(
             image_id=image_id,
             user_id=user_id,
-            status='created'
+            status='created',
+            user_notes=user_notes
         )
 
         logger.info(f"Receipt {receipt_id} created for image {image_id}")
@@ -177,6 +252,42 @@ async def process_image(update: Update, context: ContextTypes.DEFAULT_TYPE, is_d
                 db.update_receipt_status(receipt_id, 'pre-processed')
 
                 logger.info(f"Image {image_id} processed successfully, receipt {receipt_id} status: pre-processed")
+
+                # SKEW DETECTION PHASE
+                # Analyze skew after preprocessing
+                from services import skew_detector
+                from config import Config
+
+                config = context.bot_data.get('config') or Config()
+
+                # Update user: analyzing skew
+                await status_message.edit_text(
+                    ('✅ PDF received!\n✅ Converted to image\n✅ Pre-processing complete!\n' if is_pdf else '✅ Image received!\n✅ Pre-processing complete!\n') +
+                    '🔍 Analyzing image skew...'
+                )
+
+                skew_analysis = skew_detector.analyze_image_skew(processed_path)
+                max_skew = abs(skew_analysis.get('max_skew_angle', 0.0))
+
+                logger.info(f"Skew analysis for receipt {receipt_id}: max_angle={max_skew:.2f}°")
+
+                # Check if skew exceeds threshold
+                if max_skew > config.skew_threshold:
+                    # Store analysis data for callback handlers
+                    context.user_data['pending_skew_analysis'] = {
+                        'receipt_id': receipt_id,
+                        'image_id': image_id,
+                        'processed_image_path': processed_path,
+                        'is_pdf_source': is_pdf,
+                        'skew_analysis': skew_analysis
+                    }
+
+                    # Show skew warning to user
+                    await show_skew_warning(update, status_message, skew_analysis, receipt_id)
+                    return  # Pause processing, wait for user decision
+
+                # Skew is minimal, continue with normal flow
+                logger.info(f"Skew {max_skew:.2f}° is below threshold {config.skew_threshold}°, continuing")
 
                 # Update user with success
                 if is_pdf:

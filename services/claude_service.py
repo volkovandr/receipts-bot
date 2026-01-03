@@ -9,6 +9,7 @@ import json
 import logging
 from pathlib import Path
 from typing import Dict, Any, Optional, List
+from services.metrics_service import MetricsService
 
 logger = logging.getLogger(__name__)
 
@@ -36,16 +37,20 @@ class ClaudeService:
     def analyze_receipt(
         self,
         image_path: str,
-        categories: List[str],
-        category_notes: Optional[List[tuple[str, str]]] = None
+        categories: List[tuple[int, str]],
+        category_notes: Optional[List[tuple[int, str, str]]] = None,
+        merchant_notes: Optional[List[tuple[str, str, str, str]]] = None,
+        user_notes: Optional[str] = None
     ) -> tuple[Dict[str, Any], int, int]:
         """
         Analyze receipt image using Claude vision API.
 
         Args:
             image_path: Path to the receipt image file
-            categories: List of category names from database
-            category_notes: Optional list of (category_name, ai_notes) tuples
+            categories: List of (category_id, category_name) tuples from database
+            category_notes: Optional list of (category_id, category_name, ai_notes) tuples
+            merchant_notes: Optional list of (name, address, city, ai_notes) tuples
+            user_notes: Optional user-provided notes from image caption
 
         Returns:
             Tuple of (receipt_data, input_tokens, output_tokens)
@@ -59,7 +64,7 @@ class ClaudeService:
             json.JSONDecodeError: If response is not valid JSON
         """
         # Load and prepare prompt
-        prompt = self._prepare_prompt(self.prompt_template_path, categories, category_notes)
+        prompt = self._prepare_prompt(self.prompt_template_path, categories, category_notes, merchant_notes)
 
         # Load and encode image
         image_data = self._load_image(image_path)
@@ -78,27 +83,39 @@ class ClaudeService:
             if self.enable_prompt_caching:
                 system_message["cache_control"] = {"type": "ephemeral"}
 
-            # Call Claude API with vision
-            response = self.client.messages.create(
-                model=self.model,
-                max_tokens=4096,
-                system=[system_message],
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "image",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": media_type,
-                                    "data": image_data,
-                                },
-                            }
-                        ],
-                    }
-                ],
-            )
+            # Prepare messages list - start with image
+            messages_content = [
+                {
+                    "type": "image",
+                    "source": {
+                        "type": "base64",
+                        "media_type": media_type,
+                        "data": image_data,
+                    },
+                }
+            ]
+
+            # Add user notes if provided
+            if user_notes:
+                messages_content.append({
+                    "type": "text",
+                    "text": f"USER NOTE: {user_notes}"
+                })
+                logger.info(f"Added user notes to prompt: {user_notes[:50]}...")
+
+            # Call Claude API with vision (track timing)
+            with MetricsService.claude_api_duration.time():
+                response = self.client.messages.create(
+                    model=self.model,
+                    max_tokens=4096,
+                    system=[system_message],
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": messages_content,
+                        }
+                    ],
+                )
 
             # Extract text response
             if not response.content or len(response.content) == 0:
@@ -141,14 +158,22 @@ class ClaudeService:
             # Extract token usage
             input_tokens = response.usage.input_tokens
             output_tokens = response.usage.output_tokens
+            cache_creation = getattr(response.usage, 'cache_creation_input_tokens', 0)
+            cache_read = getattr(response.usage, 'cache_read_input_tokens', 0)
+
+            # Record metrics
+            MetricsService.record_tokens(
+                model=self.model,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cache_read_tokens=cache_read,
+                cache_creation_tokens=cache_creation
+            )
 
             # Log cache statistics if caching is enabled
             cache_info = ""
-            if self.enable_prompt_caching and hasattr(response.usage, 'cache_creation_input_tokens'):
-                cache_creation = getattr(response.usage, 'cache_creation_input_tokens', 0)
-                cache_read = getattr(response.usage, 'cache_read_input_tokens', 0)
-                if cache_creation > 0 or cache_read > 0:
-                    cache_info = f", cache: {cache_creation} created / {cache_read} read"
+            if self.enable_prompt_caching and (cache_creation > 0 or cache_read > 0):
+                cache_info = f", cache: {cache_creation} created / {cache_read} read"
 
             logger.info(f"Receipt analysis successful, status: {receipt_data.get('extraction_status', 'unknown')}, "
                        f"tokens: {input_tokens} in / {output_tokens} out{cache_info}")
@@ -171,16 +196,18 @@ class ClaudeService:
     def _prepare_prompt(
         self,
         template_path: str,
-        categories: List[str],
-        category_notes: Optional[List[tuple[str, str]]] = None
+        categories: List[tuple[int, str]],
+        category_notes: Optional[List[tuple[int, str, str]]] = None,
+        merchant_notes: Optional[List[tuple[str, str, str, str]]] = None
     ) -> str:
         """
-        Load prompt template and inject categories list and category notes.
+        Load prompt template and inject categories list, category notes, and merchant notes.
 
         Args:
             template_path: Path to prompt template file
-            categories: List of category names
-            category_notes: Optional list of (category_name, ai_notes) tuples
+            categories: List of (category_id, category_name) tuples
+            category_notes: Optional list of (category_id, category_name, ai_notes) tuples
+            merchant_notes: Optional list of (name, address, city, ai_notes) tuples
 
         Returns:
             Complete prompt text with categories and notes injected
@@ -192,24 +219,40 @@ class ClaudeService:
         with open(template_file, 'r', encoding='utf-8') as f:
             template = f.read()
 
-        # Format categories as bullet list
-        categories_text = "\n".join(f"- {cat}" for cat in categories)
+        # Format categories as bullet list with IDs
+        categories_text = "\n".join(f"- [{cat_id}] {cat_name}" for cat_id, cat_name in categories)
 
         # Replace placeholder with actual categories
         prompt = template.replace(">> list of categories <<", categories_text)
 
         # Format category notes
         if category_notes and len(category_notes) > 0:
-            notes_text = "The following categories have special assignment rules. When you encounter items matching these descriptions, prioritize these notes over general categorization logic:\n\n"
-            for category_name, ai_note in category_notes:
-                notes_text += f"- {category_name}\n  Note: {ai_note}\n\n"
+            notes_text = "The following category-specific guidelines, prefer these rules over default assignment logic:\n"
+            for category_id, category_name, ai_note in category_notes:
+                notes_text += f"- [{category_id}] {category_name} - Note: {ai_note}\n"
             logger.debug(f"Added {len(category_notes)} category notes to prompt")
         else:
-            notes_text = "No special category assignment rules defined."
+            notes_text = ""
             logger.debug("No category notes to add to prompt")
 
         # Replace placeholder with category notes
         prompt = prompt.replace(">> category notes <<", notes_text)
+
+        # Format merchant notes
+        if merchant_notes and len(merchant_notes) > 0:
+            merchant_text = "The following merchants have special recognition or categorization rules:\n"
+            for name, address, city, ai_note in merchant_notes:
+                merchant_text += f"- {name}"
+                if city:
+                    merchant_text += f", {city}"
+                merchant_text += f" - Note: {ai_note}\n\n"
+            logger.debug(f"Added {len(merchant_notes)} merchant notes to prompt")
+        else:
+            merchant_text = "No special merchant recognition rules defined."
+            logger.debug("No merchant notes to add to prompt")
+
+        # Replace placeholder with merchant notes
+        prompt = prompt.replace(">> merchant notes <<", merchant_text)
 
         logger.debug(f"Prompt prepared with {len(categories)} categories")
         return prompt

@@ -15,6 +15,7 @@ from typing import Optional, Tuple
 import cv2
 import numpy as np
 from PIL import Image
+from services.metrics_service import MetricsService
 
 logger = logging.getLogger(__name__)
 
@@ -44,43 +45,45 @@ class ImageProcessor:
         Returns:
             Path to processed image, or None if processing failed
         """
-        try:
-            # Read image
-            image = cv2.imread(input_path)
-            if image is None:
-                logger.error(f"Failed to read image: {input_path}")
+        # Track processing duration with metrics
+        with MetricsService.image_processing_duration.time():
+            try:
+                # Read image
+                image = cv2.imread(input_path)
+                if image is None:
+                    logger.error(f"Failed to read image: {input_path}")
+                    return None
+
+                logger.info(f"Processing image: {input_path}, shape: {image.shape}, skip_crop: {skip_crop}")
+
+                # Step 1: Convert to grayscale first (simplifies detection)
+                grayscale = self._convert_to_grayscale(image)
+
+                # Step 2: Crop to receipt (skip for PDFs as they are already scanned)
+                if skip_crop:
+                    cropped = grayscale
+                    logger.info("Skipping crop step (already scanned)")
+                else:
+                    cropped = self._crop_receipt(grayscale)
+
+                # Step 3: Resize if needed
+                resized = self._resize_image(cropped)
+
+                # Save processed image with JPEG compression
+                output_path = self._generate_output_path(input_path)
+                # Use JPEG quality setting (85 is good balance between quality and size)
+                success = cv2.imwrite(str(output_path), resized, [cv2.IMWRITE_JPEG_QUALITY, 90])
+
+                if not success:
+                    logger.error(f"Failed to save processed image: {output_path}")
+                    return None
+
+                logger.info(f"Saved processed image: {output_path}, shape: {resized.shape}")
+                return str(output_path)
+
+            except Exception as e:
+                logger.error(f"Error processing image {input_path}: {e}", exc_info=True)
                 return None
-
-            logger.info(f"Processing image: {input_path}, shape: {image.shape}, skip_crop: {skip_crop}")
-
-            # Step 1: Convert to grayscale first (simplifies detection)
-            grayscale = self._convert_to_grayscale(image)
-
-            # Step 2: Crop to receipt (skip for PDFs as they are already scanned)
-            if skip_crop:
-                cropped = grayscale
-                logger.info("Skipping crop step (already scanned)")
-            else:
-                cropped = self._crop_receipt(grayscale)
-
-            # Step 3: Resize if needed
-            resized = self._resize_image(cropped)
-
-            # Save processed image with JPEG compression
-            output_path = self._generate_output_path(input_path)
-            # Use JPEG quality setting (85 is good balance between quality and size)
-            success = cv2.imwrite(str(output_path), resized, [cv2.IMWRITE_JPEG_QUALITY, 90])
-
-            if not success:
-                logger.error(f"Failed to save processed image: {output_path}")
-                return None
-
-            logger.info(f"Saved processed image: {output_path}, shape: {resized.shape}")
-            return str(output_path)
-
-        except Exception as e:
-            logger.error(f"Error processing image {input_path}: {e}", exc_info=True)
-            return None
 
     def _crop_receipt(self, image: np.ndarray) -> np.ndarray:
         """

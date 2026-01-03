@@ -23,6 +23,7 @@ class CategoryRepository:
     def get_all_categories(self) -> list:
         """
         Get all category names from database.
+        Categories with AI notes are returned first, then alphabetically.
 
         Returns:
             List of category names (strings)
@@ -32,7 +33,15 @@ class CategoryRepository:
 
         try:
             with self.connection.cursor() as cursor:
-                cursor.execute("SELECT category_name FROM category ORDER BY category_name;")
+                cursor.execute(
+                    """
+                    SELECT category_name
+                    FROM category
+                    ORDER BY
+                        ai_notes IS NULL,
+                        category_name;
+                    """
+                )
                 categories = [row[0] for row in cursor.fetchall()]
                 logger.debug(f"Retrieved {len(categories)} categories from database")
                 return categories
@@ -85,12 +94,12 @@ class CategoryRepository:
             logger.error(f"Failed to get category ID: {e}")
             raise
 
-    def get_categories_with_notes(self) -> list[tuple[str, str]]:
+    def get_categories_with_notes(self) -> list[tuple[int, str, str]]:
         """
         Get categories that have AI notes defined.
 
         Returns:
-            List of tuples (category_name, ai_notes) where ai_notes is not NULL
+            List of tuples (category_id, category_name, ai_notes) where ai_notes is not NULL
         """
         if not self.connection:
             raise RuntimeError("Database not connected")
@@ -98,7 +107,7 @@ class CategoryRepository:
         try:
             with self.connection.cursor() as cursor:
                 cursor.execute(
-                    "SELECT category_name, ai_notes FROM category "
+                    "SELECT category_id, category_name, ai_notes FROM category "
                     "WHERE ai_notes IS NOT NULL "
                     "ORDER BY category_name;"
                 )

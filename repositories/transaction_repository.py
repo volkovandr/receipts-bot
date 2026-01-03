@@ -63,3 +63,87 @@ class TransactionRepository:
             self.connection.rollback()
             logger.error(f"Failed to insert transaction: {e}")
             raise
+
+    def update_transaction_datetime(self, transaction_id: int, date, time) -> bool:
+        """
+        Update transaction date and time.
+
+        Args:
+            transaction_id: Transaction ID
+            date: New date (date object or None)
+            time: New time (time object or None)
+
+        Returns:
+            True if updated successfully, False if transaction not found
+        """
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE transaction
+                    SET date = %s,
+                        time = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE transaction_id = %s
+                    RETURNING transaction_id;
+                    """,
+                    (date, time, transaction_id)
+                )
+                result = cursor.fetchone()
+                self.connection.commit()
+
+                if result:
+                    logger.info(f"Transaction {transaction_id} date/time updated to {date} {time}")
+                    return True
+                else:
+                    logger.warning(f"Transaction {transaction_id} not found")
+                    return False
+
+        except psycopg2.Error as e:
+            self.connection.rollback()
+            logger.error(f"Failed to update transaction datetime: {e}")
+            raise
+
+    def update_transaction_total(self, transaction_id: int, brutto_amount: float) -> bool:
+        """
+        Update transaction brutto (total) amount.
+
+        Args:
+            transaction_id: Transaction ID
+            brutto_amount: New brutto/total amount
+
+        Returns:
+            True if updated successfully, False if transaction not found
+        """
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE transaction
+                    SET brutto_amount = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE transaction_id = %s
+                    RETURNING transaction_id;
+                    """,
+                    (brutto_amount, transaction_id)
+                )
+                result = cursor.fetchone()
+                self.connection.commit()
+
+                if result:
+                    logger.info(f"Transaction {transaction_id} total amount updated to {brutto_amount}")
+                    return True
+                else:
+                    logger.warning(f"Transaction {transaction_id} not found")
+                    return False
+
+        except psycopg2.Error as e:
+            self.connection.rollback()
+            logger.error(f"Failed to update transaction total: {e}")
+            raise

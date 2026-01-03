@@ -32,7 +32,7 @@ class AIAnalysisRepository:
             extraction_status: Status (complete, partial, needs_review, failed, refused)
             input_tokens: Number of input tokens
             output_tokens: Number of output tokens
-            raw_data: Full JSON response from Claude (optional)
+            raw_data: Parsed JSON response from Claude (dict, will be stored as JSONB)
             error_message: Error message if analysis failed (optional)
 
         Returns:
@@ -61,4 +61,33 @@ class AIAnalysisRepository:
         except psycopg2.Error as e:
             self.connection.rollback()
             logger.error(f"Failed to insert AI analysis: {e}")
+            raise
+
+    def update_ai_analysis_error(self, analysis_id: int, error_message: str) -> None:
+        """
+        Update AI analysis record with error message and set status to failed.
+
+        Args:
+            analysis_id: The analysis record ID to update
+            error_message: Error message to store
+        """
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE ai_analysis
+                    SET extraction_status = 'failed',
+                        error_message = %s
+                    WHERE analysis_id = %s;
+                    """,
+                    (error_message, analysis_id)
+                )
+                self.connection.commit()
+                logger.info(f"AI analysis {analysis_id} updated with error: {error_message[:100]}")
+        except psycopg2.Error as e:
+            self.connection.rollback()
+            logger.error(f"Failed to update AI analysis error: {e}")
             raise

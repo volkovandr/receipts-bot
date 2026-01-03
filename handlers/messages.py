@@ -211,6 +211,7 @@ async def handle_category_search_input(update: Update, context: ContextTypes.DEF
 async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Route text messages to appropriate handlers based on editing mode.
+    Also stores text messages temporarily in case they precede an image (for external app sharing).
     """
     editing_mode = context.user_data.get('editing_mode')
 
@@ -218,4 +219,12 @@ async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE
         await handle_amount_input(update, context)
     elif editing_mode == 'category':
         await handle_category_search_input(update, context)
-    # If no editing mode, ignore the message (other handlers may process it)
+    else:
+        # Not in editing mode - store this text message temporarily
+        # in case an image follows (external app sharing scenario)
+        import time
+        context.user_data['pending_user_note'] = {
+            'text': update.message.text,
+            'timestamp': time.time()
+        }
+        logger.debug(f"Stored pending user note: {update.message.text[:50]}...")

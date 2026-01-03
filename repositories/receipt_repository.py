@@ -22,7 +22,7 @@ class ReceiptRepository:
         self.connection = connection
         self.category_repository = category_repository
 
-    def insert_receipt(self, image_id: int, user_id: int, status: str = 'created') -> int:
+    def insert_receipt(self, image_id: int, user_id: int, status: str = 'created', user_notes: str = None) -> int:
         """
         Insert receipt record into database.
 
@@ -30,6 +30,7 @@ class ReceiptRepository:
             image_id: ID of the associated image
             user_id: Telegram user ID
             status: Processing status (default: 'created')
+            user_notes: Optional user-provided notes from caption
 
         Returns:
             receipt_id: The ID of the inserted receipt record
@@ -41,15 +42,18 @@ class ReceiptRepository:
             with self.connection.cursor() as cursor:
                 cursor.execute(
                     """
-                    INSERT INTO receipt (image_id, user_id, processing_status)
-                    VALUES (%s, %s, %s)
+                    INSERT INTO receipt (image_id, user_id, processing_status, user_notes)
+                    VALUES (%s, %s, %s, %s)
                     RETURNING receipt_id;
                     """,
-                    (image_id, user_id, status)
+                    (image_id, user_id, status, user_notes)
                 )
                 receipt_id = cursor.fetchone()[0]
                 self.connection.commit()
-                logger.info(f"Receipt record inserted with ID: {receipt_id}")
+                if user_notes:
+                    logger.info(f"Receipt record inserted with ID: {receipt_id} (with user notes)")
+                else:
+                    logger.info(f"Receipt record inserted with ID: {receipt_id}")
                 return receipt_id
         except psycopg2.Error as e:
             self.connection.rollback()
@@ -1021,6 +1025,7 @@ class ReceiptRepository:
         Returns:
             Dictionary with keys:
             - merchant_name: str
+            - merchant_city: str (or None if not set)
             - transaction_date: str
             - currency: str
             - brutto_amount: float
@@ -1041,6 +1046,7 @@ class ReceiptRepository:
                         """
                         SELECT
                             COALESCE(m.name, 'Unknown') as merchant_name,
+                            m.city as merchant_city,
                             COALESCE(t.date::text, 'N/A') as transaction_date,
                             COALESCE(t.currency, 'EUR') as currency,
                             t.brutto_amount,
@@ -1063,6 +1069,7 @@ class ReceiptRepository:
                         """
                         SELECT
                             COALESCE(m.name, 'Unknown') as merchant_name,
+                            m.city as merchant_city,
                             COALESCE(t.date::text, 'N/A') as transaction_date,
                             COALESCE(t.currency, 'EUR') as currency,
                             t.brutto_amount,
@@ -1084,15 +1091,16 @@ class ReceiptRepository:
                 result = cursor.fetchone()
 
                 if result:
-                    raw_data = result[4] if result[4] else {}
+                    raw_data = result[5] if result[5] else {}
                     return {
                         'merchant_name': result[0],
-                        'transaction_date': result[1],
-                        'currency': result[2],
-                        'brutto_amount': float(result[3]) if result[3] is not None else None,
+                        'merchant_city': result[1],
+                        'transaction_date': result[2],
+                        'currency': result[3],
+                        'brutto_amount': float(result[4]) if result[4] is not None else None,
                         'uncertain_fields': raw_data.get('uncertain_fields', []),
                         'need_clarification': raw_data.get('need_clarification', []),
-                        'has_edits': result[5]
+                        'has_edits': result[6]
                     }
                 else:
                     if user_id is not None:
@@ -1166,3 +1174,154 @@ class ReceiptRepository:
             self.connection.rollback()
             logger.error(f"Failed to create item: {e}")
             return None
+
+    def update_receipt_merchant(self, receipt_id: int, merchant_id: int, user_id: int = None) -> bool:
+        """
+        Update receipt's merchant.
+
+        Args:
+            receipt_id: Receipt ID
+            merchant_id: New merchant ID
+            user_id: User ID (for authorization, optional)
+
+        Returns:
+            True if updated successfully, False otherwise
+        """
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+
+        try:
+            with self.connection.cursor() as cursor:
+                # Verify user owns this receipt (if user_id provided)
+                if user_id is not None:
+                    cursor.execute(
+                        """
+                        SELECT user_id FROM receipt WHERE receipt_id = %s;
+                        """,
+                        (receipt_id,)
+                    )
+                    result = cursor.fetchone()
+
+                    if not result:
+                        logger.warning(f"Receipt {receipt_id} not found")
+                        return False
+
+                    if result[0] != user_id:
+                        logger.warning(f"User {user_id} attempted to update merchant for receipt {receipt_id} owned by user {result[0]}")
+                        return False
+
+                # Update merchant
+                cursor.execute(
+                    """
+                    UPDATE receipt
+                    SET merchant_id = %s,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE receipt_id = %s
+                    RETURNING receipt_id;
+                    """,
+                    (merchant_id, receipt_id)
+                )
+                result = cursor.fetchone()
+                self.connection.commit()
+
+                if result:
+                    logger.info(f"Receipt {receipt_id} merchant updated to {merchant_id}")
+                    return True
+                else:
+                    logger.warning(f"Receipt {receipt_id} not found")
+                    return False
+
+        except psycopg2.Error as e:
+            self.connection.rollback()
+            logger.error(f"Failed to update receipt merchant: {e}")
+            raise
+
+    def get_receipt_transaction_id(self, receipt_id: int, user_id: int = None) -> int | None:
+        """
+        Get transaction_id for a receipt.
+
+        Args:
+            receipt_id: Receipt ID
+            user_id: User ID (for authorization, optional)
+
+        Returns:
+            transaction_id or None if not found or not authorized
+        """
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+
+        try:
+            with self.connection.cursor() as cursor:
+                # Verify user owns this receipt (if user_id provided)
+                if user_id is not None:
+                    cursor.execute(
+                        """
+                        SELECT transaction_id, user_id
+                        FROM receipt
+                        WHERE receipt_id = %s;
+                        """,
+                        (receipt_id,)
+                    )
+                    result = cursor.fetchone()
+
+                    if not result:
+                        logger.warning(f"Receipt {receipt_id} not found")
+                        return None
+
+                    if result[1] != user_id:
+                        logger.warning(f"User {user_id} attempted to access receipt {receipt_id} owned by user {result[1]}")
+                        return None
+
+                    return result[0]
+                else:
+                    cursor.execute(
+                        """
+                        SELECT transaction_id
+                        FROM receipt
+                        WHERE receipt_id = %s;
+                        """,
+                        (receipt_id,)
+                    )
+                    result = cursor.fetchone()
+                    return result[0] if result else None
+
+        except psycopg2.Error as e:
+            logger.error(f"Failed to get receipt transaction_id: {e}")
+            raise
+
+    def get_user_notes_by_receipt_id(self, receipt_id: int) -> str | None:
+        """
+        Get user notes for a receipt.
+
+        Args:
+            receipt_id: Receipt ID
+
+        Returns:
+            User notes string, or None if no notes or receipt not found
+        """
+        if not self.connection:
+            raise RuntimeError("Database not connected")
+
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT user_notes
+                    FROM receipt
+                    WHERE receipt_id = %s;
+                    """,
+                    (receipt_id,)
+                )
+                result = cursor.fetchone()
+
+                if result:
+                    user_notes = result[0]
+                    if user_notes:
+                        logger.debug(f"Retrieved user notes for receipt {receipt_id}: {user_notes[:50]}...")
+                    return user_notes
+                else:
+                    logger.warning(f"Receipt {receipt_id} not found")
+                    return None
+        except psycopg2.Error as e:
+            logger.error(f"Failed to get user notes: {e}")
+            raise

@@ -18,9 +18,10 @@ class ReceiptDetailScreen(Screen):
 
     BINDINGS = [
         Binding("a", "add_item", "Add Item", show=True),
-        Binding("e", "edit_item", "Edit Item", show=True),
-        Binding("d", "delete_item", "Delete Item", show=True),
-        Binding("u", "undelete_item", "Undelete Item", show=True),
+        Binding("enter", "edit_item", "Edit Item", show=True),
+        Binding("delete", "delete_item", "Delete Item", show=True),
+        Binding("ctrl+delete", "undelete_item", "Undelete Item", show=True),
+        Binding("T", "edit_total", "Edit Total", show=True),
         Binding("escape", "back", "Back to List", show=True),
         Binding("q", "quit", "Quit", show=False),
     ]
@@ -74,6 +75,18 @@ class ReceiptDetailScreen(Screen):
         # Load items
         self.load_items()
 
+    def refresh_receipt_data(self) -> None:
+        """Refresh receipt_data from database to get latest total_receipt value."""
+        try:
+            receipts = self.db.get_all_receipts_for_list(self.user_id, include_deleted=True)
+            for receipt in receipts:
+                if receipt['receipt_id'] == self.receipt_id:
+                    self.receipt_data = receipt
+                    logger.debug(f"Receipt data refreshed: total_receipt={receipt.get('total_receipt')}")
+                    break
+        except Exception as e:
+            logger.error(f"Failed to refresh receipt data: {e}")
+
     def show_receipt_header(self) -> None:
         """Display receipt header information with current totals calculated from items."""
         header = self.query_one("#receipt_header", Static)
@@ -104,11 +117,13 @@ class ReceiptDetailScreen(Screen):
             total_receipt_str = f"{total_receipt:.2f}" if total_receipt else "0.00"
 
         # Check for discrepancy (tolerance: 0.01)
-        has_discrepancy = abs(current_total_items - Decimal(str(total_receipt))) > Decimal('0.01')
+        discrepancy_amount = current_total_items - Decimal(str(total_receipt))
+        has_discrepancy = abs(discrepancy_amount) > Decimal('0.01')
 
-        discrepancy_warning = ""
+        discrepancy_info = ""
         if has_discrepancy:
-            discrepancy_warning = " ⚠️  DISCREPANCY DETECTED"
+            discrepancy_sign = "+" if discrepancy_amount > 0 else ""
+            discrepancy_info = f" ⚠️  DISCREPANCY: {discrepancy_sign}{float(discrepancy_amount):.2f} {currency}"
 
         header_text = f"""
 [bold]Receipt #{self.receipt_id}[/bold]
@@ -116,18 +131,32 @@ Merchant: {merchant} ({city})
 Date: {date_str} {time_str}
 Status: {status}
 Total (Items): {currency} {total_items_str}
-Total (Receipt): {currency} {total_receipt_str}{discrepancy_warning}
+Total (Receipt): {currency} {total_receipt_str}{discrepancy_info}
         """
 
         header.update(header_text.strip())
 
-    def load_items(self, preserve_cursor: bool = False) -> None:
+        # Update container styling based on discrepancy status
+        container = self.query_one("#detail_container")
+        if has_discrepancy:
+            container.add_class("discrepancy")
+            container.remove_class("no-discrepancy")
+        else:
+            container.add_class("no-discrepancy")
+            container.remove_class("discrepancy")
+
+    def load_items(self, preserve_cursor: bool = False, refresh_receipt: bool = False) -> None:
         """Load items from database and populate table.
 
         Args:
             preserve_cursor: If True, restore cursor to the same row index after reload
+            refresh_receipt: If True, refresh receipt_data from database (for updated totals)
         """
         table = self.query_one("#items_table", DataTable)
+
+        # Refresh receipt data if requested (e.g., after editing total)
+        if refresh_receipt:
+            self.refresh_receipt_data()
 
         # Save cursor position if requested
         saved_cursor_row = table.cursor_row if preserve_cursor else None
@@ -203,6 +232,12 @@ Total (Receipt): {currency} {total_receipt_str}{discrepancy_warning}
                 "", "", "", "", "",
                 key="error"
             )
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        """Handle row selection (Enter key) in the items table."""
+        logger.info(f"Item row selected: {event.row_key}")
+        # Trigger edit action when Enter is pressed on a row
+        self.action_edit_item()
 
     def action_add_item(self) -> None:
         """Open modal to add a new item to the receipt."""
@@ -394,6 +429,27 @@ Total (Receipt): {currency} {total_receipt_str}{discrepancy_warning}
         except Exception as e:
             logger.error(f"Error restoring item: {e}")
             self.notify(f"Error: {e}", severity="error")
+
+    def action_edit_total(self) -> None:
+        """Edit receipt total amount."""
+        current_total = self.receipt_data.get('total_receipt')
+        currency = self.receipt_data.get('currency', 'EUR')
+
+        # Use run_worker to handle async modal
+        self.run_worker(self._edit_total_worker(current_total, currency), exclusive=True)
+
+    async def _edit_total_worker(self, current_total, currency: str) -> None:
+        """Worker to handle total editing modal."""
+        from console_ui.widgets.receipt_total_editor import ReceiptTotalEditorModal
+
+        result = await self.app.push_screen_wait(
+            ReceiptTotalEditorModal(self.db, self.receipt_id, self.user_id, current_total, currency)
+        )
+
+        if result:
+            # Reload items with receipt refresh to update total and recalculate discrepancy
+            self.load_items(preserve_cursor=True, refresh_receipt=True)
+            self.notify("Receipt total updated - discrepancy status recalculated", severity="information")
 
     def action_back(self) -> None:
         """Go back to receipt list."""

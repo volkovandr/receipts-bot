@@ -87,7 +87,7 @@ class Database:
         """Get category ID by name."""
         return self.category_repo.get_category_id_by_name(category_name)
 
-    def get_categories_with_notes(self) -> list[tuple[str, str]]:
+    def get_categories_with_notes(self) -> list[tuple[int, str, str]]:
         """Get categories that have AI notes defined."""
         return self.category_repo.get_categories_with_notes()
 
@@ -118,6 +118,23 @@ class Database:
         """Get count of receipts for a merchant."""
         return self.merchant_repo.get_receipt_count_by_merchant(merchant_id)
 
+    def get_all_merchants(self) -> list[dict]:
+        """Get all merchants."""
+        return self.merchant_repo.get_all_merchants()
+
+    def find_merchant_by_name(self, name: str) -> dict | None:
+        """Find merchant by name (case-insensitive)."""
+        return self.merchant_repo.find_merchant_by_name(name)
+
+    def create_merchant(self, name: str, city: str = None, country: str = None,
+                       address: str = None, logo_description: str = None) -> int | None:
+        """Create a new merchant."""
+        return self.merchant_repo.create_merchant(name, city, country, address, logo_description)
+
+    def get_merchants_with_notes(self) -> list[tuple[str, str, str, str]]:
+        """Get merchants that have AI notes defined."""
+        return self.merchant_repo.get_merchants_with_notes()
+
     # Transaction operations
     def insert_transaction(self, date: str = None, time: str = None, currency: str = 'EUR',
                           net_amount: float = None, vat_amount: float = None,
@@ -128,6 +145,14 @@ class Database:
             date, time, currency, net_amount, vat_amount, brutto_amount, payment_method, card_number
         )
 
+    def update_transaction_datetime(self, transaction_id: int, date, time) -> bool:
+        """Update transaction date and time."""
+        return self.transaction_repo.update_transaction_datetime(transaction_id, date, time)
+
+    def update_transaction_total(self, transaction_id: int, brutto_amount: float) -> bool:
+        """Update transaction brutto (total) amount."""
+        return self.transaction_repo.update_transaction_total(transaction_id, brutto_amount)
+
     # AI Analysis operations
     def insert_ai_analysis(self, model_name: str, extraction_status: str,
                           input_tokens: int, output_tokens: int,
@@ -137,10 +162,14 @@ class Database:
             model_name, extraction_status, input_tokens, output_tokens, raw_data, error_message
         )
 
+    def update_ai_analysis_error(self, analysis_id: int, error_message: str) -> None:
+        """Update AI analysis record with error message."""
+        return self.ai_analysis_repo.update_ai_analysis_error(analysis_id, error_message)
+
     # Receipt operations
-    def insert_receipt(self, image_id: int, user_id: int, status: str = 'created') -> int:
+    def insert_receipt(self, image_id: int, user_id: int, status: str = 'created', user_notes: str = None) -> int:
         """Insert receipt record."""
-        return self.receipt_repo.insert_receipt(image_id, user_id, status)
+        return self.receipt_repo.insert_receipt(image_id, user_id, status, user_notes)
 
     def update_receipt_status(self, receipt_id: int, status: str) -> None:
         """Update receipt processing status."""
@@ -226,3 +255,54 @@ class Database:
     def get_receipt_items_for_console(self, receipt_id: int, user_id: int = None) -> list[dict]:
         """Get all receipt items for console UI (includes deleted items)."""
         return self.receipt_repo.get_receipt_items_for_console(receipt_id, user_id)
+
+    def update_receipt_merchant(self, receipt_id: int, merchant_id: int, user_id: int = None) -> bool:
+        """Update receipt's merchant."""
+        return self.receipt_repo.update_receipt_merchant(receipt_id, merchant_id, user_id)
+
+    def update_receipt_transaction_datetime(self, receipt_id: int, date, time, user_id: int = None) -> bool:
+        """
+        Update receipt's transaction date and time.
+
+        Args:
+            receipt_id: Receipt ID
+            date: New date
+            time: New time
+            user_id: User ID (for authorization)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        # Get transaction_id with authorization check
+        transaction_id = self.receipt_repo.get_receipt_transaction_id(receipt_id, user_id)
+
+        if transaction_id is None:
+            return False
+
+        # Update transaction datetime
+        return self.transaction_repo.update_transaction_datetime(transaction_id, date, time)
+
+    def update_receipt_transaction_total(self, receipt_id: int, brutto_amount: float, user_id: int = None) -> bool:
+        """
+        Update receipt's transaction total amount.
+
+        Args:
+            receipt_id: Receipt ID
+            brutto_amount: New brutto/total amount
+            user_id: User ID (for authorization)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        # Get transaction_id with authorization check
+        transaction_id = self.receipt_repo.get_receipt_transaction_id(receipt_id, user_id)
+
+        if transaction_id is None:
+            return False
+
+        # Update transaction total
+        return self.transaction_repo.update_transaction_total(transaction_id, brutto_amount)
+
+    def get_user_notes_by_receipt_id(self, receipt_id: int) -> str | None:
+        """Get user notes for a receipt."""
+        return self.receipt_repo.get_user_notes_by_receipt_id(receipt_id)

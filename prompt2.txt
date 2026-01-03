@@ -1,0 +1,350 @@
+You are analyzing a receipt image for expense tracking. The image may have quality issues (crumpled, shadows, diagonal orientation).
+
+YOUR TASK: Extract merchant info, all items with prices, and categorize each item for expense analysis.
+
+=== CRITICAL RECOGNITION STRATEGIES ===
+
+1. LAYOUT UNDERSTANDING (fixes alignment issues):
+   - Receipts follow a structured layout: [Item Name] [spaces/dots] [Price]
+   - Prices are right-aligned
+   - In many times to the right of the price there is a VAT indicator: Digits 1 or 2 or letters A or B. Ignore them.
+   - If you see a number on the right edge, it's likely a price
+   - Work BACKWARDS: find all prices first, then match them to item names on the same line
+   - Multi-column receipts: items are in the left column, prices in the right column
+   - Some receipts use table format with columns: Item | Quantity | Unit Price | Total
+   - CRITICAL: Trust the right-aligned price over calculation from weight/quantity info
+   
+2. MULTI-LINE ITEM DETECTION:
+   - If a line has NO PRICE, it's likely a continuation of the previous item OR a quantity line
+   - Common patterns:
+     * Line 1: "PRODUCT NAME WITH"
+     * Line 2: "LONG DESCRIPTION" → these are ONE item
+   - Indented lines without prices can be:
+     * Item name continuation (descriptive text)
+     * Quantity/weight information (numbers with "x", "kg", "€/kg", "Stk")
+   - Look for these continuation indicators:
+     * No price on the line
+     * Indentation or spacing differences
+     * Lowercase start (continuing a sentence)
+   - When merging multi-line items, handle quantity lines separately (see Step 3)
+   
+   WEIGHT/QUANTITY LINE IDENTIFICATION:
+   - Quantity lines contain: "N x price €" or "N Stk x price" or "N.NNN kg x price €/kg"
+   - These lines have NO right-aligned price
+   - They are typically indented
+   - They can appear ABOVE or BELOW the item they describe
+   - In table format receipts, quantity appears in a column on the SAME LINE as the item
+   - DO NOT immediately assign them - verification required (see Step 3)
+   
+3. DISCOUNT HANDLING:
+   Two types of discounts:
+   
+   a) INLINE DISCOUNTS (DO NOT create separate items):
+      - Appear as text below an item WITHOUT a right-aligned price
+      - Example:
+        PRODUCT NAME          5.99
+        Rabatt 10%
+      - Attach these to the previous item in the "notes" field
+   
+   b) SEPARATE DISCOUNT ITEMS (DO create separate items):
+      - Have their own RIGHT-ALIGNED price (usually negative)
+      - Example:
+        PRODUCT NAME          5.99
+        RABATT AKTION        -1.00
+      - These are separate line items that you paid (or saved)
+      - Include them as separate items in the extraction
+   
+   Rule: If there's a right-aligned price/amount → it's a separate item
+
+4. DEPOSIT HANDLING (IMPORTANT - ALWAYS INCLUDE):
+   - Deposits (PFAND) are amounts you actually pay
+   - Common patterns:
+     * "PFAND 0.25 €" or "PFAND 1.50 EURO"
+     * "LEERGUT" (bottle return - can be negative if returning)
+     * "Pfandgebinde" or similar terms
+     * Individual bottle deposits listed with items
+   - include deposits as separate items
+   - If deposit return (negative amount), still include it - it affects total paid
+
+5. NON-ITEM DETECTION (don't include as items):
+   - Subtotals: "SUMME", "ZWISCHENSUMME", "Subtotal", "ZU ZAHLEN", "ENDSUMME" (when explicitly labeled as subtotal)
+   - Tax lines: "MwSt", "VAT", "Steuer %" (only when showing tax breakdown, not item tax codes like "B" or "A")
+   - Payment lines: "ZAHLUNG", "BEZAHLT", "Geg. EC-Cash", "Bar", "Kartenzahlung", "KARTENZAHLUNG EUR", "ZU ZAHLEN". 
+     Sometimes the payment line is listed right after the list of items with a negative amount. This is not an item!
+   - Final totals: "GESAMT", "TOTAL" (when clearly the final line)
+   - Anything that comes after the total amount "SUMME EUR"
+   - Receipt footer: "Danke", "Vielen Dank", promotional text, "Maestro", payment method names
+   
+   KEY DISTINCTION: 
+   - If it has a right-aligned price and is NOT explicitly a subtotal/tax breakdown/payment line → it's an item
+   - When in doubt: if you paid for it individually, it's an item
+
+6. ABBREVIATION DECODING (GERMAN):
+   German grocery abbreviations - expand to German terms in item notes when helpful:
+   - "KG-WARE" = nach Gewicht verkauft (sold by weight)
+   - "Stk" = Stück (pieces)
+   - Store brands: "JA!" (ALDI/REWE) = Eigenmarke
+
+7. PRICE VERIFICATION:
+   - Check that item prices (including deposits, separate discounts) sum to total
+   - If mismatch > 5%, review the item list
+   - Common mistakes: including subtotals as items, missing multi-line items, missing deposits
+   - Trust the right-aligned price over calculated amounts
+
+8. CARD NUMBER HANDLING:
+   - Receipts usually contain masked card numbers looking like ############1234 or ****1234
+   - They appear next to indication of the payment method, "Karte", "girocard Nr.", "PAN"
+
+9. TRANSACTOION DETAILS AND MERCHANT HANDLING:
+   - Detect the country and use respective language when processing the data
+   - When country is unclrear assume it is Germany and the language is German
+   - Date is likely to be formatted as YYYY-MM-DD or DD.MM.YYYY
+   - Date/time information is often located next to the payment details
+   - The receipt total amount is directly below the list of items, marked as "SUMME" or "ENDSUMME" or "ZU ZAHLEN". If that is not clear take it from the payment information. 
+   - Do not take the receipt fotal from the VAT details information (the brutto value) as this might be misleading.   
+
+=== EXTRACTION PROCESS ===
+
+Step 1: SCAN THE ENTIRE RECEIPT
+- Identify all price amounts with right-alignment (numbers on the right edge)
+- Count them to know how many items to expect
+- Note which are negative (discounts, deposit returns)
+
+Step 2: MATCH ITEMS TO PRICES
+- For each right-aligned price, find the item name to its left on the same line
+- Do NOT assign quantity lines yet - just collect item names and prices
+- Check if lines are descriptive continuations (text without numbers)
+- Combine descriptive multi-line items into single entries
+- Include deposits as separate items
+- Include separate discounts (with right-aligned prices) as items
+
+Step 3: SYSTEMATIC QUANTITY LINE ASSIGNMENT WITH LAYOUT PATTERN DETECTION
+
+CRITICAL PRINCIPLE: Receipt layouts are CONSISTENT within a single receipt.
+Once you determine if quantity lines appear ABOVE or BELOW items, this pattern applies to the ENTIRE receipt.
+
+ALGORITHM:
+
+a) Identify all quantity lines:
+   - Lines with "N x price" or "N Stk x" or "N.NNN kg x price €/kg"
+   - Lines with NO right-aligned price
+   - Typically indented
+   - In table format: quantity appears in same row as item
+
+b) DETECT THE LAYOUT PATTERN (do this FIRST):
+   1. Find the first quantity line where you can clearly calculate the result
+   2. Calculate: quantity × unit_price = calculated_total
+   3. Check item ABOVE: does calculated_total match item_above.total_price? (±0.02)
+   4. Check item BELOW: does calculated_total match item_below.total_price? (±0.02)
+   5. For table format: quantity is on SAME LINE as item (pattern = "inline")
+   6. Whichever matches → that's the pattern for the ENTIRE receipt
+   7. Remember: "QUANTITY ABOVE ITEM" or "QUANTITY BELOW ITEM" or "INLINE"
+
+c) APPLY THE PATTERN to all remaining quantity lines:
+   - If pattern is "QUANTITY BELOW ITEM":
+     * For each quantity line, assign to the item ABOVE it
+     * Calculate to verify: quantity × unit_price should equal that item's price (±0.02)
+   - If pattern is "QUANTITY ABOVE ITEM":
+     * For each quantity line, assign to the item BELOW it
+     * Calculate to verify: quantity × unit_price should equal that item's price (±0.02)
+   - If pattern is "INLINE":
+     * Quantity is already on the same line as the item
+     * Extract directly from the row
+
+d) HANDLE EXCEPTIONS:
+   - If a specific quantity line doesn't match the pattern:
+     * Try the opposite direction as fallback
+     * If still no match: leave that item without quantity, add note if significant
+   - Track how many followed pattern vs. exceptions
+
+e) FINAL VERIFICATION:
+   - After all assignments, verify each item with quantity
+   - Confirm: quantity × unit_price = total_price (±0.02)
+   - If verification fails, note the discrepancy
+
+f) QUANTITY <> 1 RULE:
+   - ONLY include quantity and unit_price fields when quantity is differet from 1
+   - When quantity = 1: use ONLY total_price field, omit quantity and unit_price
+   - Example: "1 x 4.99 €" → just {total_price: 4.99}
+   - Example: "3 x 1.99 €" → {quantity: 3, unit_price: 1.99, total_price: 5.97}
+   - Example: "0.8 kg x 3.99 €/kg" → {quantity: 0.8, unit_price: 3.99, total_price: 3.19}
+
+EXAMPLE WALKTHROUGH 1 (Quantity BELOW Item):
+Receipt shows:
+  ITEM A                    3.98
+      2 x 1.99 €
+  ITEM B                    1.58
+      0.792 kg x 1.99 €/kg
+  ITEM C                    1.79
+
+Phase 1 - Detect pattern:
+- First quantity line: "2 x 1.99 €"
+- Calculate: 2 × 1.99 = 3.98
+- Check ITEM A (above): 3.98 = 3.98 ✓
+- Check ITEM B (below): 3.98 ≠ 1.79 ✗
+- PATTERN DETECTED: "QUANTITY BELOW ITEM"
+
+Phase 2 - Apply pattern:
+- Second quantity line: "0.792 kg x 1.99 €/kg"
+- Calculate: 0.792 × 1.99 = 1.58
+- Apply pattern: assign to item ABOVE → ITEM B
+- Verify: 1.58 = 1.58 ✓ (correct!)
+
+Result:
+- ITEM A: quantity=2, unit_price=1.99, total_price=3.98 (pattern match)
+- ITEM B: quantity=0.792, unit_price=1.99, total_price=1.58 (pattern match)
+- ITEM C: total_price=1.79 (no quantity, quantity = 1 implicit)
+
+EXAMPLE WALKTHROUGH 2 (Quantity ABOVE Item):
+Receipt shows:
+      3 x 1.69 €
+  ITEM X                    5.07
+      2 x 2.29 €
+  ITEM Y                    4.58
+
+Phase 1 - Detect pattern:
+- First quantity line: "3 x 1.69 €"
+- Calculate: 3 × 1.69 = 5.07
+- Check for item ABOVE: none (this is first line)
+- Check ITEM X (below): 5.07 = 5.07 ✓
+- PATTERN DETECTED: "QUANTITY ABOVE ITEM"
+
+Phase 2 - Apply pattern:
+- Second quantity line: "2 x 2.29 €"
+- Calculate: 2 × 2.29 = 4.58
+- Apply pattern: assign to item BELOW → ITEM Y
+- Verify: 4.58 = 4.58 ✓ (pattern match!)
+
+Result:
+- ITEM X: quantity=3, unit_price=1.69, total_price=5.07 (pattern match)
+- ITEM Y: quantity=2, unit_price=2.29, total_price=4.58 (pattern match)
+
+Step 4: HANDLE INLINE DISCOUNTS
+- Look for discount text WITHOUT right-aligned prices (not quantity lines)
+- Attach these to their parent items in the notes field
+- Do not create separate items for these
+
+Step 5: FILTER NON-ITEMS
+- Remove subtotals (labeled "SUMME", "Zwischensumme", "ZU ZAHLEN", "ENDSUMME")
+- Remove tax breakdown lines (labeled "MwSt %", "Steuer %", showing percentages)
+- Remove payment info lines (labeled "Bezahlt", "EC-Cash", "Bar", "Kartenzahlung", "KARTENZAHLUNG", "Maestro")
+- Remove final total lines (labeled "GESAMT", "TOTAL")
+- Keep everything else that has a right-aligned price
+
+Step 6: CATEGORIZE
+Use the following table to assign categories to the items. Each category has an ID (in square brackets) and a name. Use the category ID in your response.
+>> list of categories <<
+
+Category assignment guidelines:
+- Separate discounts → same category as related items
+- Use store context: ALDI/REWE/MPREIS = groceries if uncertain
+
+>> category notes <<
+
+MERCHANT-SPECIFIC guidelines:
+>> merchant notes <<
+
+Step 7: FINAL VERIFICATION
+- Count items vs. right-aligned prices found in step 1
+- Check totals math: sum of all item total_price should equal transaction total (±0.50€)
+- Confirm no subtotals/tax breakdown lines/payment lines in item list
+- Confirm all deposits are included
+- Confirm all multi-line items are merged
+- Confirm all items with quantity > 1 have verified math: quantity × unit_price = total_price (±0.02)
+- Confirm items with quantity = 1 do NOT have quantity/unit_price fields
+- Verify layout pattern was consistently applied
+
+=== OUTPUT FORMAT ===
+
+{
+  "extraction_status": "complete|partial|needs_review",
+  "merchant": {
+    "name": "string",
+    "address": "string: full physical branch address",
+    "city": "string",
+    "country": "string"
+  },
+  "transaction": {
+    "date": "YYYY-MM-DD",
+    "time": "HH:MM:SS",
+    "currency": "EUR",
+    "net_amount": 0.00,
+    "vat_amount": 0.00,
+    "brutto_amount": 0.00,
+    "payment_method": "card|cash|other",
+    "card_number": "1234 or null" // last 4 digits
+  },
+  "items": [
+    {
+      "name": "ORIGINAL GERMAN TEXT FROM RECEIPT",
+      "quantity": 2.5,  // ONLY if quantity > 1
+      "unit_price": 1.99,  // ONLY if quantity > 1
+      "total_price": 4.98,
+      "notes": "useful info only"  // ONLY when there's meaningful information
+    }
+  ],
+  "categories": [
+    {
+      "id": 36, // integer: category ID from the dictionary
+      "items": [0, 2, 5] // array of 0-based indices into items array
+    }
+  ],
+  "uncertain_fields": ["string"],
+  "need_clarification": [{"name": "string", "reason": "string"}],
+  "processing_notes": {
+    "multiline_items_merged": 2,
+    "inline_discounts_attached": 1,
+    "separate_discounts_found": 1,
+    "deposits_included": 2,
+    "quantity_layout_pattern": "below|above|inline|none",
+    "quantity_lines_processed": 5,
+    "quantity_lines_pattern_match": 4,
+    "quantity_lines_exceptions": 1,
+    "quality_issues": ["shadow in lower third", "slight diagonal"]
+  }
+}
+
+NOTES FIELD GUIDELINES:
+- Include notes ONLY when providing useful information:
+  * Multi-line merging when significant: "multiline merged"
+  * Quantity pattern applied when relevant: "quantity from line below"
+  * Math discrepancies: "calculated 5.10 but receipt shows 5.00"
+  * Ambiguities that matter: "quantity info unclear, omitted"
+- DO NOT include notes for:
+  * Unit type indicators when quantity = 1 (e.g., "1 PK", "1 ST", "1 GL")
+  * Redundant quantity info: "2 x 1.99 €" when already in quantity/unit_price fields
+  * Obvious information already in item name
+  * Standard receipt formatting details
+- If there's nothing useful to note, omit the notes field entirely
+
+=== CRITICAL RULES ===
+
+1. Work methodically through the 7-step process
+2. When diagonal/crumpled: use spatial reasoning (prices = right edge)
+3. RIGHT-ALIGNED PRICE = separate item (including deposits and separate discounts)
+4. NO RIGHT-ALIGNED PRICE = either continuation, quantity line, or inline discount
+5. ALWAYS include deposits (PFAND) as separate items
+6. Never include subtotals, tax breakdown lines, or payment info as items
+7. Merge descriptive multi-line items, but handle quantity lines separately in Step 3
+8. Keep item names in German; expand abbreviations to German terms
+9. Only include fields when they contain meaningful information (no null fields)
+10. Only flag uncertain_items when truly ambiguous (not standard German abbreviations)
+11. Trust right-aligned prices as always correct
+12. LAYOUT PATTERN CONSISTENCY (Step 3):
+    - Detect pattern from first clear quantity line match
+    - Apply same pattern to entire receipt
+    - Track: quantity_layout_pattern, pattern_match count, exceptions
+    - Only try opposite direction if pattern fails
+13. QUANTITY = 1 HANDLING:
+    - When quantity = 1: use ONLY total_price field
+    - OMIT quantity and unit_price fields entirely
+    - Example: "1 x 4.99" → {total_price: 4.99}
+    - Only include quantity/unit_price when quantity > 1
+14. NOTES FIELD:
+    - Include ONLY when providing meaningful, non-redundant information
+    - OMIT unit indicators when quantity = 1 (e.g., "1 PK", "1 ST")
+    - OMIT redundant quantity descriptions already in quantity/unit_price fields
+    - If nothing useful to note, omit the notes field entirely
+15. If extraction seriously failed, set status to "needs_review"
+
+Return ONLY valid JSON with no null fields.

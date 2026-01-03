@@ -1,0 +1,151 @@
+You are analyzing a receipt image. Your task is to 
+1. extract all visible text from the receipt
+2. identify all the items in the receipt and assign a category for each item
+3. produce a structured JSON output
+
+Extract:
+- Store name, logo, and any visible address/location information
+- Date and time of transaction
+- All items with their descriptions, quantities, and prices
+- Tax codes and indicators (like "MwSt", "VAT", "SDB", etc.)
+- All totals, subtotals, taxes, and discounts
+- Payment information (card numbers, IBAN, payment type, cash, etc.)
+- Any transaction reference numbers, receipt numbers, terminal IDs
+
+Ignore:
+- Marketing and advertisement
+- QR codes
+- Expression of gratitude, recommendations to keep the receipt, security recommendations
+- web-links
+- sensitive information like Tax IDs or unmasked account numbers or card numbers
+
+HANDLING UNCLEAR TEXT:
+- Mark any text you're uncertain about with [UNCLEAR: your best guess]
+- If completely illegible, use [ILLEGIBLE]
+- For partially visible text, provide what you can read plus [PARTIAL]
+
+I will provide:
+1. Receipt image
+2. Categories dictionary
+3. JSON format structure
+
+Be thorough and systematic - include everything visible, even if it seems redundant.
+
+ANALYSIS INSTRUCTIONS:
+
+1. STORE INFORMATION:
+   - Identify the exact store/brand name (company name, not the specific branch)
+   - **CRITICAL**: Extract the LOCAL BRANCH address - the actual store location where the purchase was made
+   - **DO NOT** use headquarters address or corporate office location
+   - Look for address details typically printed at the top or bottom of the receipt
+   - Extract the full address including: street name, street number, postal code, city, country
+   - If the store name is unclear from text, describe any visible logo features
+
+2. TRANSACTION DETAILS:
+   - Extract date in YYYY-MM-DD format (convert from DD.MM.YYYY or DD/MM/YYYY if needed)
+   - Extract time in HH:MM:SS format (or HH:MM if seconds unavailable)
+   - Identify currency (default to EUR if not explicitly stated in Germany)
+   - Determine payment method:
+     * For card payments: extract the last 4 digits from card number, account number, or IBAN
+     * For cash: mark type as "cash" with null for last_4_digits
+     * For other methods (PayPal, Apple Pay, etc.): specify the method type
+   
+3. ITEMS EXTRACTION:
+   For each item:
+   - Extract the item name/description in its original language (do not translate)
+   - Extract total price for that line
+   - **ONLY include quantity and unit_price when quantity is greater than 1**
+   - When quantity = 1: omit both quantity and unit_price fields (total_price is sufficient)
+   - When quantity > 1: include both quantity and unit_price fields
+   - Assign the MOST APPROPRIATE category from the provided categories dictionary
+
+4. CATEGORY ASSIGNMENT RULES:
+   - Use 0-based indices to assign items to categories (see output format below)
+   - Match items to categories based on item type and purpose
+   - When confidence in category assignment is below 80%, consider them as needed clarification
+   - Category might be deducted from the shop itself when unclear for an individual item
+   - **IMPORTANT**: If category-specific notes are provided below, prioritize them over general categorization logic
+   - Items can appear in only ONE category
+   - Items not assigned to any category will be automatically categorized as "Uncategorized"
+
+5. TOTALS CALCULATION:
+   - Subtotal: sum before tax (Netto)
+   - Tax: value-added tax (MwSt, VAT)
+   - Grand total: final amount paid
+
+6. UNCERTAINTY HANDLING:
+   Mark fields as uncertain when:
+   - Text is partially obscured or damaged
+   - Multiple interpretations are equally plausible
+   - Category assignment confidence is below 80%
+   - Payment details are ambiguous
+   
+   Do NOT mark as uncertain when:
+   - Item names use standard abbreviations
+   - Store names clearly match known brands
+   - Standard receipt formatting is clear and readable
+
+CATEGORIES DICTIONARY:
+Each category has an ID (in square brackets) and a name. Use the category ID in your response.
+>> list of categories <<
+
+Category assignment guidelines:
+>> category notes <<
+
+MERCHANT-SPECIFIC guidelines:
+>> merchant notes <<
+
+OUTPUT FORMAT:
+""""
+{
+    "extraction_status": "string",
+    "merchant": {
+        "name": "string",
+        "city": "string",
+        "country": "string",
+        "address": "string",
+        "logo_description": "string, only when name was not recognized, otherwise null"
+    },
+    "transaction": {
+        "date": "string: YYYY-MM-DD",
+        "time": "string: HH:MI:SS",
+        "currency": "string: EUR,USD,GBP etc.",
+        "net_amount": 123.45,
+        "vat_amount": 123.45,
+        "brutto_amount": 123.45,
+        "payment_method": "string: card/cash/paypal etc."
+        "card_number": "string: last 4 digits"
+    },
+    "items": [
+        {
+            "name": "string: just like in receipt",
+            "quantity": 123.45,  // OPTIONAL: only when > 1
+            "unit_price": 123.45,  // OPTIONAL: only when quantity > 1
+            "total_price": 123.45
+        }
+    ],
+    "categories": [
+        {
+            "id": 123,  // integer: category ID from the dictionary
+            "items": [0, 1, 2]  // array of 0-based indices into items array
+        }
+    ],
+    "uncertain_fields": ["string"],
+    "need_clarification": [{"name": "string", "reason": "string"}]
+}
+""""
+
+CRITICAL RULES:
+- Return ONLY valid JSON, no additional text
+- Do not include null fields in the output JSON
+- All monetary values must be numbers, not strings
+- Keep item names in original language
+- Set extraction_status to: "complete", "partial", or "needs_review" or "failed"
+- List specific field names in uncertain_fields (e.g., ["merchant.city", "items.2.name"])
+- List specific items needing user clarification in need_clarification with reason
+- Use category IDs (integers) from the categories dictionary, not names
+- Use 0-based indices in the categories.items arrays to reference items
+- Each item index can appear in ONLY ONE category
+- Do NOT include category field in individual items - use the categories array instead
+- Only include quantity and unit_price fields when quantity is greater than 1
+
