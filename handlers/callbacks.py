@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ContextTypes
+from telegram.error import BadRequest
 from services.receipt_formatter import format_receipt_summary
 
 logger = logging.getLogger(__name__)
@@ -61,12 +62,13 @@ async def show_edit_item_view(query, db, receipt_id: int, item_index: int, user_
     keyboard = []
 
     # Action buttons for current item
+    # Note: item_name is NOT included in callback_data to avoid Telegram's 64-byte limit
     keyboard.append([
         InlineKeyboardButton("❌ Delete", callback_data=f"del_item_{item_id}_{receipt_id}_{item_index}"),
-        InlineKeyboardButton("💰 Edit amount", callback_data=f"edit_amt_{item_id}_{receipt_id}_{item_index}_{item_name}"),
+        InlineKeyboardButton("💰 Edit amount", callback_data=f"edit_amt_{item_id}_{receipt_id}_{item_index}"),
     ])
     keyboard.append([
-        InlineKeyboardButton("🏷️ Change category", callback_data=f"edit_cat_{item_id}_{receipt_id}_{item_index}_{item_name}")
+        InlineKeyboardButton("🏷️ Change category", callback_data=f"edit_cat_{item_id}_{receipt_id}_{item_index}")
     ])
 
     # Navigation buttons
@@ -87,12 +89,35 @@ async def show_edit_item_view(query, db, receipt_id: int, item_index: int, user_
     try:
         await query.edit_message_text(message_text, reply_markup=reply_markup)
         logger.info(f"Showing item {item_index + 1}/{len(items)} for receipt {receipt_id} to user {user_id}")
-    except Exception as edit_error:
+    except BadRequest as edit_error:
         # Handle "message not modified" error - just acknowledge silently
         if "message is not modified" in str(edit_error).lower():
             logger.debug(f"Message not modified for receipt {receipt_id} item {item_index}")
         else:
+            # Log detailed debug information for any BadRequest error
+            logger.error(f"BadRequest error editing message: {edit_error}")
+            logger.error(f"Receipt ID: {receipt_id}, Item index: {item_index}, User ID: {user_id}")
+            logger.error(f"Message text length: {len(message_text)} characters")
+            logger.error(f"Keyboard structure: {len(keyboard)} rows, {sum(len(row) for row in keyboard)} total buttons")
+
+            # Log all callback_data for debugging
+            all_callback_data = []
+            for row_idx, row in enumerate(keyboard):
+                for btn_idx, button in enumerate(row):
+                    all_callback_data.append(button.callback_data)
+                    logger.error(f"  Row {row_idx}, Button {btn_idx}: text='{button.text}', callback_data='{button.callback_data}' ({len(button.callback_data)} bytes)")
+
+            # Check for duplicates
+            if len(all_callback_data) != len(set(all_callback_data)):
+                logger.error(f"WARNING: Duplicate callback_data detected!")
+                logger.error(f"All callback_data: {all_callback_data}")
+
+            logger.error(f"Message text preview (first 200 chars): {message_text[:200]}")
             raise
+    except Exception as edit_error:
+        logger.error(f"Unexpected error editing message: {edit_error}")
+        logger.error(f"Exception type: {type(edit_error).__name__}")
+        raise
 
 
 async def handle_view_items_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -311,6 +336,8 @@ async def handle_edit_receipt_callback(update: Update, context: ContextTypes.DEF
         await show_edit_item_view(query, db, receipt_id, item_index, user_id)
     except Exception as e:
         logger.error(f"Error getting items for receipt {receipt_id}: {e}")
+        logger.error(f"Exception type: {type(e).__name__}")
+        logger.error(f"Exception details: {str(e)}")
         try:
             await query.edit_message_text(
                 f"❌ Error loading items!\n\n"
@@ -393,21 +420,46 @@ async def handle_edit_amount_callback(update: Update, context: ContextTypes.DEFA
     query = update.callback_query
     await query.answer()
 
-    # Extract item_id, receipt_id, item_index, and item_name from callback_data: edit_amt_{item_id}_{receipt_id}_{item_index}_{item_name}
+    # Extract item_id, receipt_id, and item_index from callback_data: edit_amt_{item_id}_{receipt_id}_{item_index}
     callback_data = query.data
     if not callback_data.startswith("edit_amt_"):
         logger.warning(f"Invalid callback data: {callback_data}")
         return
 
     try:
-        parts = callback_data.replace("edit_amt_", "").split("_", 3)
+        parts = callback_data.replace("edit_amt_", "").split("_")
         item_id = int(parts[0])
         receipt_id = int(parts[1])
         item_index = int(parts[2]) if len(parts) > 2 else 0
-        item_name = parts[3] if len(parts) > 3 else "item"
     except (ValueError, IndexError):
         logger.error(f"Failed to parse callback_data: {callback_data}")
         await query.edit_message_text("❌ Error: Invalid data")
+        return
+
+    # Get database from context
+    db = context.bot_data.get('database')
+    if not db:
+        logger.error("Database connection not available")
+        await query.edit_message_text("❌ Error: Database not available")
+        return
+
+    # Get user ID for authorization check
+    user_id = query.from_user.id
+
+    # Fetch item details to get the name
+    try:
+        items = db.get_receipt_items_detailed(receipt_id, user_id)
+        item = next((i for i in items if i['item_id'] == item_id), None)
+
+        if not item:
+            await query.edit_message_text("❌ Item not found or access denied")
+            logger.warning(f"User {user_id} attempted to edit item {item_id} - not found or not authorized")
+            return
+
+        item_name = item['item_name']
+    except Exception as e:
+        logger.error(f"Error fetching item details: {e}")
+        await query.edit_message_text("❌ Error loading item details")
         return
 
     # Set editing mode in user context
@@ -431,21 +483,46 @@ async def handle_edit_category_callback(update: Update, context: ContextTypes.DE
     query = update.callback_query
     await query.answer()
 
-    # Extract item_id, receipt_id, item_index, and item_name from callback_data: edit_cat_{item_id}_{receipt_id}_{item_index}_{item_name}
+    # Extract item_id, receipt_id, and item_index from callback_data: edit_cat_{item_id}_{receipt_id}_{item_index}
     callback_data = query.data
     if not callback_data.startswith("edit_cat_"):
         logger.warning(f"Invalid callback data: {callback_data}")
         return
 
     try:
-        parts = callback_data.replace("edit_cat_", "").split("_", 3)
+        parts = callback_data.replace("edit_cat_", "").split("_")
         item_id = int(parts[0])
         receipt_id = int(parts[1])
         item_index = int(parts[2]) if len(parts) > 2 else 0
-        item_name = parts[3] if len(parts) > 3 else "item"
     except (ValueError, IndexError):
         logger.error(f"Failed to parse callback_data: {callback_data}")
         await query.edit_message_text("❌ Error: Invalid data")
+        return
+
+    # Get database from context
+    db = context.bot_data.get('database')
+    if not db:
+        logger.error("Database connection not available")
+        await query.edit_message_text("❌ Error: Database not available")
+        return
+
+    # Get user ID for authorization check
+    user_id = query.from_user.id
+
+    # Fetch item details to get the name
+    try:
+        items = db.get_receipt_items_detailed(receipt_id, user_id)
+        item = next((i for i in items if i['item_id'] == item_id), None)
+
+        if not item:
+            await query.edit_message_text("❌ Item not found or access denied")
+            logger.warning(f"User {user_id} attempted to edit item {item_id} - not found or not authorized")
+            return
+
+        item_name = item['item_name']
+    except Exception as e:
+        logger.error(f"Error fetching item details: {e}")
+        await query.edit_message_text("❌ Error loading item details")
         return
 
     # Set editing mode in user context
