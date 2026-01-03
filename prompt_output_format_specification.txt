@@ -1,0 +1,89 @@
+=== OUTPUT FORMAT: TOON ===
+
+TOON (Token-Optimized Object Notation) - minimal syntax specification.
+
+SYNTAX RULES:
+1. Simple fields: key: value
+2. Nested objects: use 2-space indentation
+3. Arrays with uniform schema:
+   arrayName[count]{field1,field2,field3}:
+     value1,value2,value3
+     value1,value2,value3
+4. Omit optional fields entirely - leave positions empty or skip trailing commas
+5. No quotes except when value contains comma or starts with number+space
+6. Booleans: true/false (lowercase)
+7. Empty arrays: arrayName[0]:
+
+FIELD OMISSION IN ARRAYS:
+- If optional field is missing: skip it (use consecutive commas for middle fields)
+- If all trailing optional fields missing: end row at last present field
+- Examples:
+  items[3]{name,price,qty,note}:
+    Milk,2.99              (qty and note omitted)
+    Bread,1.49,2           (note omitted)
+    Eggs,3.19,,fresh       (qty omitted, note present)
+
+EXAMPLE:
+merchant:
+  name: REWE
+  city: Dortmund
+
+transaction:
+  date: 2025-10-11
+  total: 21.74
+
+items[3]{name,total_price,category_id,quantity,unit_price,notes}:
+  Milk,2.99,36
+  Bread,1.49,36,2,0.75
+  Eggs,3.19,36,,organic
+
+processing_notes:
+  deposits_included: 2
+  quality_issues[0]:
+
+=== REQUIRED OUTPUT STRUCTURE ===
+
+extraction_status: complete|partial|needs_review
+
+merchant:
+  name: string
+  address: string
+  city: string
+  country: string
+
+transaction:
+  date: YYYY-MM-DD
+  time: HH:MM:SS
+  currency: EUR
+  net_amount: 0.00
+  vat_amount: 0.00
+  brutto_amount: 0.00
+  payment_method: card|cash|other
+  card_number: 1234
+
+items[N]{name,total_price,category_id,quantity,unit_price,notes}:
+  ITEM_NAME,0.00,36
+  ITEM_NAME,0.00,35,2,1.50
+  ITEM_NAME,0.00,73,,,multiline merged
+
+processing_notes:
+  multiline_items_merged: 0
+  inline_discounts_attached: 0
+  separate_discounts_found: 0
+  deposits_included: 0
+  quantity_layout_pattern: below|above|inline|none
+  quantity_lines_processed: 0
+  quantity_lines_pattern_match: 0
+  quantity_lines_exceptions: 0
+  quality_issues[N]: issue1,issue2
+
+uncertain_fields[N]: field1,field2
+
+need_clarification[N]{name,reason}:
+  item_name,explanation
+
+FIELD RULES:
+- Include quantity,unit_price ONLY when quantity > 1
+- Include notes ONLY when providing non-redundant useful information
+- Omit uncertain_fields and need_clarification blocks entirely if empty
+- category_id: use integer ID from categories dictionary

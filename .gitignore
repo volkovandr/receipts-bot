@@ -55,3 +55,5 @@ tmp/
 images/
 categories.txt
 categories.sql
+full_prompt.txt
+*prompt_ng*

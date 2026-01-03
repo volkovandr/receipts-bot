@@ -75,7 +75,7 @@ CREATE TABLE ai_analysis (
     extraction_status TEXT,  -- complete, partial, needs_review, failed, refused
     input_tokens INTEGER,
     output_tokens INTEGER,
-    raw_data JSONB,  -- Full Claude AI response for debugging/reprocessing
+    raw_data TEXT,  -- Full Claude AI response for debugging/reprocessing
     error_message TEXT,  -- Error message if analysis failed
     created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
