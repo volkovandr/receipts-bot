@@ -22,3 +22,6 @@ textual==1.0.0
 # Metrics
 prometheus-client>=0.23.0
 
+# Testing
+pytest>=9.0.0
+

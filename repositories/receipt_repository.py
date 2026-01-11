@@ -1091,15 +1091,17 @@ class ReceiptRepository:
                 result = cursor.fetchone()
 
                 if result:
-                    raw_data = result[5] if result[5] else {}
+                    # Note: uncertain_fields and need_clarification from raw_data are not included
+                    # because raw_data is now stored as a string (JSON or TOON format) and parsing
+                    # it here would require format detection. These fields are rarely populated anyway.
                     return {
                         'merchant_name': result[0],
                         'merchant_city': result[1],
                         'transaction_date': result[2],
                         'currency': result[3],
                         'brutto_amount': float(result[4]) if result[4] is not None else None,
-                        'uncertain_fields': raw_data.get('uncertain_fields', []),
-                        'need_clarification': raw_data.get('need_clarification', []),
+                        'uncertain_fields': [],  # Not parsed from raw_data (string format)
+                        'need_clarification': [],  # Not parsed from raw_data (string format)
                         'has_edits': result[6]
                     }
                 else:

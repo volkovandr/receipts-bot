@@ -156,8 +156,8 @@ class Database:
     # AI Analysis operations
     def insert_ai_analysis(self, model_name: str, extraction_status: str,
                           input_tokens: int, output_tokens: int,
-                          raw_data: dict = None, error_message: str = None) -> int:
-        """Insert AI analysis record."""
+                          raw_data: str = None, error_message: str = None) -> int:
+        """Insert AI analysis record. Raw data should be string (JSON or TOON format)."""
         return self.ai_analysis_repo.insert_ai_analysis(
             model_name, extraction_status, input_tokens, output_tokens, raw_data, error_message
         )

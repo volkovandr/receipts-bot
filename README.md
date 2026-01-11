@@ -296,6 +296,42 @@ See [CLAUDE.md](CLAUDE.md) for detailed development notes and architecture docum
 pkill -f "python bot.py"
 ```
 
+### Testing
+
+The project uses pytest for unit testing. Tests are located in the `tests/` directory.
+
+**Run all tests:**
+```bash
+./venv/bin/python -m pytest
+```
+
+**Run with verbose output:**
+```bash
+./venv/bin/python -m pytest -v
+```
+
+**Run specific test file:**
+```bash
+./venv/bin/python -m pytest tests/test_toon_parser.py
+```
+
+**Run with coverage report:**
+```bash
+./venv/bin/python -m pytest --cov=services --cov-report=term-missing
+```
+
+**Other useful options:**
+```bash
+# Stop on first failure
+./venv/bin/python -m pytest -x
+
+# Show local variables on failure
+./venv/bin/python -m pytest -l
+
+# Run tests matching a pattern
+./venv/bin/python -m pytest -k "array"
+```
+
 ## Security
 
 - **Whitelist Authorization**: Configure `allowed_user_ids` in config.ini

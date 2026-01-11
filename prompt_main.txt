@@ -296,4 +296,4 @@ NOTES FIELD GUIDELINES:
     - If nothing useful to note, omit the notes field entirely
 15. If extraction seriously failed, set status to "needs_review"
 
-Return ONLY valid TOON document.
+Return JUST the valid TOON document. No thinking notes, no comments, no markdown formatting.

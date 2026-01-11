@@ -10,7 +10,7 @@ SYNTAX RULES:
      value1,value2,value3
      value1,value2,value3
 4. Omit optional fields entirely - leave positions empty or skip trailing commas
-5. No quotes except when value contains comma or starts with number+space
+5. CRITICAL: Use double quotes when value contains comma (e.g., "VOLVIC 1,5L",7.14,36)
 6. Booleans: true/false (lowercase)
 7. Empty arrays: arrayName[0]:
 
@@ -30,11 +30,11 @@ merchant:
 
 transaction:
   date: 2025-10-11
-  total: 21.74
+  brutto_amount: 21.74
 
 items[3]{name,total_price,category_id,quantity,unit_price,notes}:
   Milk,2.99,36
-  Bread,1.49,36,2,0.75
+  "Water 1,5L",1.49,36,6,0.25
   Eggs,3.19,36,,organic
 
 processing_notes:
@@ -63,7 +63,7 @@ transaction:
 
 items[N]{name,total_price,category_id,quantity,unit_price,notes}:
   ITEM_NAME,0.00,36
-  ITEM_NAME,0.00,35,2,1.50
+  "VOLVIC 1,5L",7.14,36,6,1.19
   ITEM_NAME,0.00,73,,,multiline merged
 
 processing_notes:

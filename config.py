@@ -33,7 +33,12 @@ class Config:
         self.anthropic_api_key = self.config.get('anthropic', 'api_key', fallback=None)
         self.anthropic_prompt_template = self.config.get('anthropic', 'prompt_template', fallback='prompt-combined.txt')
         self.anthropic_model = self.config.get('anthropic', 'model', fallback='claude-sonnet-4-5-20250929')
+        self.anthropic_prompt_format = self.config.get('anthropic', 'prompt_format', fallback='json')
         self.anthropic_enable_prompt_caching = self.config.getboolean('anthropic', 'enable_prompt_caching', fallback=False)
+
+        # Validate prompt format
+        if self.anthropic_prompt_format not in ['json', 'toon']:
+            raise ValueError(f"Invalid prompt_format: {self.anthropic_prompt_format} (must be 'json' or 'toon')")
 
         # Prometheus configuration
         self.prometheus_enabled = self.config.getboolean('prometheus', 'enabled', fallback=False)

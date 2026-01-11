@@ -53,7 +53,7 @@ async def analyze_receipt_with_claude(context, db, receipt_id, image_id, image_p
             logger.info(f"User notes found for receipt {receipt_id}: {user_notes[:100]}...")
 
         # Analyze receipt with Claude
-        receipt_data, input_tokens, output_tokens = claude_service.analyze_receipt(
+        receipt_data, input_tokens, output_tokens, raw_response = claude_service.analyze_receipt(
             image_path, categories, category_notes, merchant_notes, user_notes
         )
 
@@ -72,7 +72,7 @@ async def analyze_receipt_with_claude(context, db, receipt_id, image_id, image_p
             extraction_status=extraction_status,
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            raw_data=receipt_data
+            raw_data=raw_response  # Store raw TOON/JSON string, not parsed dict
         )
 
         # Validate and enrich items with categories
@@ -263,15 +263,23 @@ async def analyze_receipt_with_claude(context, db, receipt_id, image_id, image_p
     except Exception as e:
         logger.error(f"Error analyzing receipt with Claude: {e}", exc_info=True)
 
-        # Insert AI analysis record for unexpected error
+        # Insert or update AI analysis record for unexpected error
         try:
-            ai_analysis_id = db.insert_ai_analysis(
-                model_name=context.bot_data['claude_service'].model,
-                extraction_status='failed',
-                input_tokens=0,
-                output_tokens=0,
-                error_message=str(e)
-            )
+            # Check if ai_analysis_id was already created (e.g., Claude succeeded but validation failed)
+            if 'ai_analysis_id' in locals() and ai_analysis_id is not None:
+                # Update existing analysis with error
+                logger.info(f"Updating existing AI analysis {ai_analysis_id} with error")
+                db.update_ai_analysis_error(ai_analysis_id, str(e))
+            else:
+                # Create new analysis record for the error
+                logger.info("Creating new AI analysis record for error")
+                ai_analysis_id = db.insert_ai_analysis(
+                    model_name=context.bot_data['claude_service'].model,
+                    extraction_status='failed',
+                    input_tokens=0,
+                    output_tokens=0,
+                    error_message=str(e)
+                )
 
             # Update receipt with failed analysis
             db.update_receipt_with_analysis(

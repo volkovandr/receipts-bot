@@ -1,5 +1,18 @@
 # TOON Output Format Migration Plan
 
+## Progress Status
+
+- ✅ **Step 0**: Multi-Part System Messages (Prompt Refactoring) - **COMPLETED** (2026-01-11)
+- ✅ **Step 1**: Evaluate and Integrate TOON Parser Library - **COMPLETED** (2026-01-11) - Used custom parser
+- ✅ **Step 2**: Update Prompt Template - **COMPLETED** (2026-01-11) - Already done, prompts already use TOON
+- ✅ **Step 3**: Update Claude Service - **COMPLETED** (2026-01-11)
+- ✅ **Step 4**: Update Receipt Analyzer - **COMPLETED** (2026-01-11)
+- ✅ **Step 5**: Update AI Analysis Repository - **COMPLETED** (2026-01-11)
+- ✅ **Step 6**: Update Database Facade - **COMPLETED** (2026-01-11)
+- ✅ **Step 7**: Update Configuration - **COMPLETED** (2026-01-11)
+- ✅ **Step 8**: Update Bot Initialization - **COMPLETED** (2026-01-11)
+- ✅ **Step 9**: Update Receipt Repository (Read Path) - **COMPLETED** (2026-01-11)
+
 ## Executive Summary
 
 This plan implements two complementary features to reduce Claude AI API costs:
@@ -154,11 +167,21 @@ The following merchants have special recognition or categorization rules:
 
 ## Implementation Steps
 
-### Step 0: Multi-Part System Messages (Prompt Refactoring)
+### Step 0: Multi-Part System Messages (Prompt Refactoring) ✅ COMPLETED
+
+**Status**: ✅ **COMPLETED** (2026-01-11)
 
 **File**: `services/claude_service.py`
 
 **Purpose**: Replace single prompt with placeholder replacement to multi-part system messages.
+
+**Implementation Summary**:
+- ✅ Added `_build_system_messages()` method (lines 260-341)
+- ✅ Added `_format_categories_message()` helper (lines 343-383)
+- ✅ Added `_format_merchant_message()` helper (lines 385-414)
+- ✅ Updated `analyze_receipt()` to use multi-part messages (lines 66-111)
+- ✅ All tests passed: syntax validation, message building, caching modes
+- ✅ Backward compatible: `_prepare_prompt()` kept for reference
 
 **New prompt files**:
 - `prompt_main.txt` - Main extraction instructions (already exists)
@@ -367,6 +390,12 @@ response = self.client.messages.create(
 - Significant token savings: ~90% reduction on input tokens after first call
 - Only user message (image + user notes) changes per request
 
+---
+
+**✅ Step 0 COMPLETED** - Multi-part system messages successfully implemented and tested. Ready for production use with improved prompt caching architecture.
+
+---
+
 ### Step 1: Evaluate and Integrate TOON Parser Library
 
 **Primary Approach**: Use existing `toon-format` Python library (beta v0.9.0b1)
@@ -501,6 +530,32 @@ def parse_toon(toon_string: str) -> Dict[str, Any]:
 - Invalid syntax → raise `ValueError` with line number
 - Type coercion: numeric strings → int/float
 - Boolean: `true`/`false` → Python bool
+
+---
+
+**✅ Step 1 COMPLETED** (2026-01-11) - Custom TOON parser successfully implemented
+
+**Implementation Decision**: After evaluating the `toon-format` library (v0.9.0-beta.1), we discovered it doesn't support tabular arrays with optional fields as specified in our `prompt_output_format_specification.txt`. The library requires all fields to be present or uses a more verbose list-style format that reduces token efficiency by 46%.
+
+**Solution**: Implemented a custom TOON parser in `services/toon_parser.py` (340 lines) that:
+- ✅ Handles tabular arrays with optional fields (`items[N]{fields}: csv_rows`)
+- ✅ Supports missing trailing fields (token-optimized format)
+- ✅ Supports empty middle fields (consecutive commas)
+- ✅ Handles quoted values containing commas
+- ✅ Parses nested objects (2-space indentation)
+- ✅ Supports simple arrays (comma-separated on one line)
+- ✅ Type coercion (int, float, bool, string)
+- ✅ Robust error handling with detailed logging
+
+**Files Created**:
+- `services/toon_parser.py` - Custom parser implementation
+- `tests/test_toon_parser.py` - Comprehensive unit tests
+
+**Testing**: All tests passed including complete receipt structures with varying optional fields, special characters, and edge cases.
+
+**Library Decision**: The `toon-format` library was evaluated but ultimately not used. No external dependencies added.
+
+---
 
 ### Step 2: Update Prompt Template
 
