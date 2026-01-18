@@ -134,7 +134,8 @@ class MetricsService:
 
         try:
             cls.receipts_total.labels(status=status, user_id=str(user_id)).inc()
-            cls.receipts_value.labels(currency=currency, user_id=str(user_id)).inc(value)
+            # Use absolute value for counter (Prometheus counters can only be non-negative)
+            cls.receipts_value.labels(currency=currency, user_id=str(user_id)).inc(abs(value))
             cls.receipts_by_status.labels(status=status).inc()
         except Exception as e:
             logger.error(f"Failed to record receipt metric: {e}")
@@ -153,7 +154,7 @@ class MetricsService:
         Args:
             category: Item category
             user_id: Telegram user ID
-            value: Item total value
+            value: Item total value (can be negative for refunds/discounts)
             currency: Currency code
         """
         if not cls._initialized:
@@ -161,11 +162,13 @@ class MetricsService:
 
         try:
             cls.receipt_items_total.labels(category=category, user_id=str(user_id)).inc()
+            # Use absolute value for counter (Prometheus counters can only be non-negative)
+            # This tracks transaction volume regardless of direction (purchase vs refund)
             cls.receipt_items_value.labels(
                 category=category,
                 currency=currency,
                 user_id=str(user_id)
-            ).inc(value)
+            ).inc(abs(value))
         except Exception as e:
             logger.error(f"Failed to record item metric: {e}")
 

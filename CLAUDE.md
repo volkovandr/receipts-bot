@@ -562,6 +562,95 @@ async def my_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     pass
 ```
 
+## Testing
+
+The project uses **pytest** for unit testing. All tests are located in the `tests/` directory.
+
+### Running Tests
+
+**Run all tests:**
+```bash
+./venv/bin/python -m pytest
+```
+
+**Run with verbose output:**
+```bash
+./venv/bin/python -m pytest -v
+```
+
+**Run specific test file:**
+```bash
+./venv/bin/python -m pytest tests/test_toon_parser.py
+```
+
+**Run specific test class:**
+```bash
+./venv/bin/python -m pytest tests/test_toon_parser.py::TestToonParserBasicFields
+```
+
+**Run specific test method:**
+```bash
+./venv/bin/python -m pytest tests/test_toon_parser.py::TestToonParserBasicFields::test_simple_string_field
+```
+
+**Useful options:**
+```bash
+# Stop on first failure
+./venv/bin/python -m pytest -x
+
+# Show local variables on failure
+./venv/bin/python -m pytest -l
+
+# Run tests matching a pattern (by name)
+./venv/bin/python -m pytest -k "array"
+
+# Show coverage report
+./venv/bin/python -m pytest --cov=services --cov-report=term-missing
+
+# Quiet mode (minimal output)
+./venv/bin/python -m pytest -q
+```
+
+### Writing Tests
+
+When writing new tests:
+1. Create test files with `test_` prefix (e.g., `test_toon_parser.py`)
+2. Organize tests into classes with `Test` prefix (e.g., `TestToonParserBasicFields`)
+3. Name test methods with `test_` prefix (e.g., `test_simple_string_field`)
+4. Use descriptive docstrings for each test
+5. Group related tests in the same class
+6. Use `assert` statements for validation
+
+**Example test structure:**
+```python
+"""Unit tests for module_name."""
+from services.module_name import function_to_test
+
+
+class TestBasicFunctionality:
+    """Test basic functionality of the module."""
+
+    def test_simple_case(self):
+        """Test that simple case works correctly."""
+        result = function_to_test("input")
+        assert result == "expected_output"
+
+    def test_edge_case(self):
+        """Test that edge case is handled properly."""
+        result = function_to_test("")
+        assert result == {}
+```
+
+### Current Test Coverage
+
+- **TOON Parser** (`tests/test_toon_parser.py`) - 20 tests covering:
+  - Basic field parsing (strings, numbers, booleans)
+  - Nested object parsing
+  - Array parsing (empty, simple, tabular with optional fields)
+  - Receipt structure parsing (minimal and full receipts)
+  - Edge cases (quoted values, special characters, zero values)
+  - Error handling (malformed input tolerance)
+
 ## Notes
 
 - Keep error messages user-friendly

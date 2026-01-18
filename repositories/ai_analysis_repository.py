@@ -3,7 +3,6 @@ AI Analysis repository - AI analysis-related database operations.
 """
 
 import psycopg2
-import json
 import logging
 
 logger = logging.getLogger(__name__)
@@ -23,7 +22,7 @@ class AIAnalysisRepository:
 
     def insert_ai_analysis(self, model_name: str, extraction_status: str,
                           input_tokens: int, output_tokens: int,
-                          raw_data: dict = None, error_message: str = None) -> int:
+                          raw_data: str = None, error_message: str = None) -> int:
         """
         Insert AI analysis record.
 
@@ -32,7 +31,7 @@ class AIAnalysisRepository:
             extraction_status: Status (complete, partial, needs_review, failed, refused)
             input_tokens: Number of input tokens
             output_tokens: Number of output tokens
-            raw_data: Parsed JSON response from Claude (dict, will be stored as JSONB)
+            raw_data: Raw response string from Claude (JSON or TOON format)
             error_message: Error message if analysis failed (optional)
 
         Returns:
@@ -51,7 +50,7 @@ class AIAnalysisRepository:
                     RETURNING analysis_id;
                     """,
                     (model_name, extraction_status, input_tokens, output_tokens,
-                     json.dumps(raw_data) if raw_data else None, error_message)
+                     raw_data if raw_data else None, error_message)
                 )
                 analysis_id = cursor.fetchone()[0]
                 self.connection.commit()
