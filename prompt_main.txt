@@ -56,14 +56,14 @@ YOUR TASK: Extract merchant info, all items with prices, and categorize each ite
    
    Rule: If there's a right-aligned price/amount → it's a separate item
 
-4. DEPOSIT HANDLING (IMPORTANT - ALWAYS INCLUDE):
-   - Deposits (PFAND) are amounts you actually pay
+4. DEPOSIT HANDLING:
+   - Deposits (PFAND) are amounts you actually pay, they might appear in the receipts
    - Common patterns:
      * "PFAND 0.25 €" or "PFAND 1.50 EURO"
      * "LEERGUT" (bottle return - can be negative if returning)
      * "Pfandgebinde" or similar terms
      * Individual bottle deposits listed with items
-   - include deposits as separate items
+   - if found, include deposits as separate items
    - If deposit return (negative amount), still include it - it affects total paid
 
 5. NON-ITEM DETECTION (don't include as items):
