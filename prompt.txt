@@ -1,4 +1,5 @@
-You are extracting structured data from German retail receipts. Follow this process exactly.
+You are extracting structured data from German retail receipts. Follow this process exactly. 
+Return ONLY valid JSON document with no markdown formatting and no extra text. Do not explain your reasoning or steps. 
 
 === STEP 0: ANALYZE RECEIPT STRUCTURE ===
 
@@ -169,5 +170,3 @@ Before returning JSON, verify:
 □ Multi-line items properly merged
 □ No redundant notes for quantity=1 items
 □ Categories assigned to all items
-
-Return ONLY valid JSON with no markdown formatting.

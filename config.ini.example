@@ -12,7 +12,7 @@ password = your_db_password
 [anthropic]
 api_key = your_anthropic_api_key_here
 prompt_template = prompt.txt
-model = claude-sonnet-4-5-20250929
+model = claude-sonnet-4-6
 prompt_format = toon
 enable_prompt_caching = false
 
